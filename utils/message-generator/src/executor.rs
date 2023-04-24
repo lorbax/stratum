@@ -244,9 +244,13 @@ impl Executor {
                                     }
                                 },
                                 Ok(roles_logic_sv2::parsers::Mining::OpenStandardMiningChannelSuccess(m)) => {
+                                    dbg!(&m);
                                     if message_type.as_str() == "OpenStandardMiningChannelSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
-                                        check_each_field(msg, field_data);
+                                        dbg!(msg.clone());
+                                        dbg!(field_data.clone());
+                                        panic!();
+                                        check_each_field(msg,field_data);
                                     }
                                 },
                                 Ok(roles_logic_sv2::parsers::Mining::CloseChannel(m)) => {
