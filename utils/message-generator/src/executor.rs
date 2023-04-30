@@ -32,12 +32,8 @@ pub struct Executor {
 }
 
 impl Executor {
-<<<<<<< HEAD
     pub async fn new(test: Test<'static>, test_name: String) -> Executor {
-=======
-    pub async fn new(test: Test<'static>) -> Executor {
         let save: HashMap<String, String> = HashMap::new();
->>>>>>> 2dc8315e (Partial commit)
         let mut process: Vec<Option<tokio::process::Child>> = vec![];
         for command in test.setup_commmands {
             if command.command == "kill" {
@@ -140,11 +136,8 @@ impl Executor {
     }
 
     pub async fn execute(self) {
-<<<<<<< HEAD
         let mut success = true;
-=======
         let mut variables_stored = HashMap::new();
->>>>>>> 2dc8315e (Partial commit)
         for action in self.actions {
             if let Some(T) = action.actiondoc {
                 println!("{}", T);
@@ -189,7 +182,6 @@ impl Executor {
                     break;
                 }
 
-<<<<<<< HEAD
                 let message = match recv.recv().await {
                     Ok(message) => message,
                     Err(_) => {
@@ -198,12 +190,8 @@ impl Executor {
                         break;
                     },
                 };
-
-=======
-                let message = recv.recv().await.unwrap();
                 println!("AAAAAA");
                 dbg!(&message);
->>>>>>> 2dc8315e (Partial commit)
                 let mut message: Sv2Frame<AnyMessage<'static>, _> = message.try_into().unwrap();
                 println!("RECV {:#?}", message);
                 let header = message.get_header().unwrap();
