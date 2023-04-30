@@ -39,10 +39,11 @@ enum Sv2Type {
 enum ActionResult {
     MatchMessageType(u8),
     MatchMessageField((String, String, Vec<(String, Sv2Type)>)),
+    GetMessageField {subprotocol: String, message_type: String, field: (String,String)},
     MatchMessageLen(usize),
     MatchExtensionType(u16),
     CloseConnection,
-    None,
+    Noneg
 }
 
 impl std::fmt::Display for ActionResult {
@@ -90,6 +91,7 @@ struct Downstream {
 #[derive(Debug)]
 pub struct Action<'a> {
     messages: Vec<EitherFrame<AnyMessage<'a>>>,
+    tbds: Vec<Option<(String,String)>>,
     result: Vec<ActionResult>,
     role: Role,
     actiondoc: Option<String>,

@@ -5,13 +5,19 @@ use crate::{
 };
 use async_channel::{Receiver, Sender};
 use codec_sv2::{Frame, StandardEitherFrame as EitherFrame, Sv2Frame};
-use roles_logic_sv2::parsers::AnyMessage;
+use roles_logic_sv2::parsers::{AnyMessage, PoolMessages};
 use std::convert::TryInto;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::any::type_name;
 
 use std::time::Duration;
 use tokio::{fs::File, io::{copy, BufWriter, BufReader}, time::timeout};
+//use roles_logic_sv2::mining_sv2::open_channel::OpenExtendedMiningChannel;
+fn print_type_of<T>(_: &T) {
+    println!("{}", std::any::type_name::<T>())
+}
 
 pub struct Executor {
     name: Arc<String>,
@@ -22,10 +28,16 @@ pub struct Executor {
     actions: Vec<Action<'static>>,
     cleanup_commmands: Vec<Command>,
     process: Vec<Option<tokio::process::Child>>,
+    save: HashMap<String, String>,
 }
 
 impl Executor {
+<<<<<<< HEAD
     pub async fn new(test: Test<'static>, test_name: String) -> Executor {
+=======
+    pub async fn new(test: Test<'static>) -> Executor {
+        let save: HashMap<String, String> = HashMap::new();
+>>>>>>> 2dc8315e (Partial commit)
         let mut process: Vec<Option<tokio::process::Child>> = vec![];
         for command in test.setup_commmands {
             if command.command == "kill" {
@@ -75,6 +87,7 @@ impl Executor {
                     actions: test.actions,
                     cleanup_commmands: test.cleanup_commmands,
                     process,
+                    save,
                 }
             }
             (None, Some(as_up)) => {
@@ -94,6 +107,7 @@ impl Executor {
                     actions: test.actions,
                     cleanup_commmands: test.cleanup_commmands,
                     process,
+                    save,
                 }
             }
             (Some(as_down), None) => {
@@ -108,6 +122,7 @@ impl Executor {
                     actions: test.actions,
                     cleanup_commmands: test.cleanup_commmands,
                     process,
+                    save,
                 }
             }
             (None, None) => Self {
@@ -119,12 +134,17 @@ impl Executor {
                 actions: test.actions,
                 cleanup_commmands: test.cleanup_commmands,
                 process,
+                save,
             },
         }
     }
 
     pub async fn execute(self) {
+<<<<<<< HEAD
         let mut success = true;
+=======
+        let mut variables_stored = HashMap::new();
+>>>>>>> 2dc8315e (Partial commit)
         for action in self.actions {
             if let Some(T) = action.actiondoc {
                 println!("{}", T);
@@ -169,6 +189,7 @@ impl Executor {
                     break;
                 }
 
+<<<<<<< HEAD
                 let message = match recv.recv().await {
                     Ok(message) => message,
                     Err(_) => {
@@ -178,10 +199,23 @@ impl Executor {
                     },
                 };
 
+=======
+                let message = recv.recv().await.unwrap();
+                println!("AAAAAA");
+                dbg!(&message);
+>>>>>>> 2dc8315e (Partial commit)
                 let mut message: Sv2Frame<AnyMessage<'static>, _> = message.try_into().unwrap();
                 println!("RECV {:#?}", message);
                 let header = message.get_header().unwrap();
+                dbg!(header);
                 let payload = message.payload();
+                println!("AAAAAA PAYLOAD");
+                dbg!(&payload);
+                print_type_of(&payload);
+                let mut message_hashmap: HashMap<std::string::String, PoolMessages<'static>> = HashMap::new();
+                if header.msg_type() == 19 {
+                    println!("CIAO GIGI");
+                }
                 match result {
                     ActionResult::MatchMessageType(message_type) => {
                         if header.msg_type() != *message_type {
@@ -232,7 +266,14 @@ impl Executor {
                         } else if subprotocol.as_str() == "MiningProtocol" {
                             match (header.msg_type(), payload).try_into() {
                                 Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(m)) => {
+                                    print_type_of(&m);
                                     if message_type.as_str() == "OpenExtendedMiningChannel" {
+                                        let msg = serde_json::to_value(&m).unwrap();
+                                        check_each_field(msg, field_data);
+                                    }
+                                },
+                                Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannelSuccess(m)) => {
+                                    if message_type.as_str() == "OpenExtendedMiningChannelSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
@@ -244,12 +285,8 @@ impl Executor {
                                     }
                                 },
                                 Ok(roles_logic_sv2::parsers::Mining::OpenStandardMiningChannelSuccess(m)) => {
-                                    dbg!(&m);
                                     if message_type.as_str() == "OpenStandardMiningChannelSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
-                                        dbg!(msg.clone());
-                                        dbg!(field_data.clone());
-                                        panic!();
                                         check_each_field(msg,field_data);
                                     }
                                 },
@@ -309,12 +346,6 @@ impl Executor {
                                 },
                                 Ok(roles_logic_sv2::parsers::Mining::SetCustomMiningJobError(m)) => {
                                     if message_type.as_str() == "SetCustomMiningJobError" {
-                                        let msg = serde_json::to_value(&m).unwrap();
-                                        check_each_field(msg, field_data);
-                                    }
-                                },
-                                Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannelSuccess(m)) => {
-                                    if message_type.as_str() == "OpenExtendedMiningChannelSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
@@ -451,6 +482,41 @@ impl Executor {
                             panic!()
                         }
                     }
+                    ActionResult::GetMessageField{
+                        subprotocol, 
+                        message_type, 
+                        field
+                        } => {
+                        if subprotocol.as_str() == "CommonMessage" {
+                            match (header.msg_type(), payload).try_into() {
+                                Ok(roles_logic_sv2::parsers::CommonMessages::SetupConnection(m)) => {
+                                    let mess = serde_json::to_value(&m).unwrap();
+                                    let field_name = field.0;
+                                    let key = field.1;
+                                    let to_save = message_to_value(&mess, &field.0);
+                                    self.save.insert(key,to_save);
+                                },
+                                _ => panic!(),
+                            }
+                        } else if subprotocol.as_str() == "MiningProtocol" {
+                            match (header.msg_type(), payload).try_into() {
+                                Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(m)) => {
+                                    let mess = serde_json::to_value(&m).unwrap();
+                                    let field_name = field.0;
+                                    let key = field.1;
+                                    let to_save = message_to_value(&mess, &field.0);
+                                    self.save.insert(key,to_save);
+                                },
+                                _ => panic!(),
+                            }
+                        } else {
+                            println!(
+                                "match_message_field subprotocol not valid - received: {}",
+                                subprotocol
+                            );
+                            panic!()
+                        }
+                    }
                     ActionResult::MatchMessageLen(message_len) => {
                         if payload.len() != *message_len {
                             println!(
@@ -555,3 +621,9 @@ fn check_each_field(msg: serde_json::Value, field_info: &Vec<(String, Sv2Type)>)
         check_msg_field(msg.clone(), &field.0, &value_type, &field.1)
     }
 }
+fn message_to_value(m: & serde_json::Value,field: &str) -> String {
+    let msg = m.as_object().unwrap();
+    let value = msg.get(field).unwrap();
+    value.to_string()
+}
+

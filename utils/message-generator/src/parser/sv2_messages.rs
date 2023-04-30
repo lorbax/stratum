@@ -80,6 +80,8 @@ struct CommonMessage<'a> {
     #[serde(borrow)]
     message: CommonMessages<'a>,
     id: String,
+    // filed_name, keyword
+    tbd: Option<Vec<(String,String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
