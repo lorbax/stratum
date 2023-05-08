@@ -3,17 +3,20 @@ use codec_sv2::{buffer_sv2::Slice, StandardEitherFrame, Sv2Frame};
 use roles_logic_sv2::parsers::AnyMessage;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::any::Any;
+use std::any::TypeId;
 
 pub struct ActionParser {}
 
 impl ActionParser {
-    pub fn from_step_3<'a, 'b: 'a>(
+    pub fn from_step_2<'a, 'b: 'a>(
         test: &'b str,
         frames: HashMap<String, Sv2Frame<AnyMessage<'a>, Slice>>,
     ) -> Vec<Action<'a>> {
         let test: Map<String, Value> = serde_json::from_str(test).unwrap();
         let actions = test.get("actions").unwrap().as_array().unwrap();
         let mut result = vec![];
+        let tbd_action: Vec<(String, String)> = Vec::new();
         for action in actions {
             let role = match action.get("role").unwrap().as_str().unwrap() {
                 "client" => Role::Downstream,
@@ -44,6 +47,31 @@ impl ActionParser {
                     "match_message_type" => {
                         let message_type = u8::from_str_radix(&result.get("value").unwrap().as_str().unwrap()[2..], 16).expect("Result message_type should be an hex value starting with 0x and not bigger than 0xff");
                         action_results.push(ActionResult::MatchMessageType(message_type));
+                    }
+                    /// inserire get_message_field
+                    "get_message_field" => {
+                        //let mut sv2_type = result.get("value").unwrap().clone();
+                        //let sv2_type_ = sv2_type.as_array();
+                        //for item in sv2_type_ {
+                        //    if let Some(tbds) = item.get("get_field").unwrap().as_array() {
+                        //        for tbd in tbds {
+                        //            tbd_action + &tbd;
+                        //        }
+                        //    }
+                        //}
+                        //if let Some(map) = sv2_type.as_object_mut() {
+                        //    map.remove("get_field");
+                        //} 
+                        let sv2_type = result.get("value").unwrap().clone();
+                        let sv2_type: (String, String, Vec<(String, String)>) =
+                            serde_json::from_value(sv2_type)
+                                .expect("match_message_field values not correct");
+                        let get_message_field = ActionResult::GetMessageField{
+                            subprotocol: sv2_type.0, 
+                            message_type: sv2_type.1, 
+                            field: sv2_type.2
+                        } ;
+                        action_results.push(get_message_field);
                     }
                     "match_message_field" => {
                         let sv2_type = result.get("value").unwrap().clone();
@@ -79,6 +107,7 @@ impl ActionParser {
 
             let action = Action {
                 messages: action_frames,
+                tbd_action,
                 result: action_results,
                 role,
                 actiondoc,

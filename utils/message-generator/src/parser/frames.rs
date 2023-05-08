@@ -9,7 +9,7 @@ pub struct Frames<'a> {
 }
 
 impl<'a> Frames<'a> {
-    pub fn from_step_1<'b: 'a>(test: &'b str, messages: HashMap<String, AnyMessage<'a>>) -> Self {
+    pub fn from_step_1<'b: 'a>(test: &'b str, messages: HashMap<String, (AnyMessage<'a>,Vec<(String,String)>)>) -> Self {
         let test: Map<String, Value> = serde_json::from_str(test).unwrap();
         let frames = test.get("frame_builders").unwrap().as_array().unwrap();
 
@@ -33,6 +33,7 @@ impl<'a> Frames<'a> {
                     messages
                         .get(&id[0])
                         .unwrap_or_else(|| panic!("Missing messages message_id {}", id[0]))
+                        .0
                         .clone(),
                     id[0].clone(),
                 ),

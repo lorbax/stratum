@@ -10,19 +10,23 @@ use serde_json::{Map, Value};
 use std::{collections::HashMap, convert::TryInto};
 use sv2_messages::TestMessageParser;
 
+/// invece di rbd usa replace_field
+/// mettere il tbd dentro i messages1
 #[derive(Debug)]
 pub enum Parser<'a> {
     /// Parses any number or combination of messages to be later used by an action identified by
     /// message id.
-    Step1(HashMap<String, AnyMessage<'a>>),
+    /// TODO scrivere a cosa corrispodono i campi di Vec<(String, Strin)>
+    Step1(HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)>,
     /// Serializes messages into `Sv2Frames` identified by message id.
     Step2 {
-        messages: HashMap<String, AnyMessage<'a>>,
+        /// il secondo Vec<(String,String)> corrisponde al tbd 
+        messages: HashMap<String, (AnyMessage<'a>,Vec<(String,String)>)>,
         frames: HashMap<String, Sv2Frame<AnyMessage<'a>, Slice>>,
     },
     /// Parses the setup, execution, and cleanup shell commands, roles, and actions.
     Step3 {
-        messages: HashMap<String, AnyMessage<'a>>,
+        messages: HashMap<String, (AnyMessage<'a>, Vec<(String,String)>)>,
         frames: HashMap<String, Sv2Frame<AnyMessage<'a>, Slice>>,
         actions: Vec<Action<'a>>,
     },
@@ -44,6 +48,15 @@ impl<'a> Parser<'a> {
 
     fn initialize<'b: 'a>(test: &'b str) -> Self {
         let messages = TestMessageParser::from_str(test);
+        ///let mut tbd = Vec::new();
+        /// non si puo' iterare su uno struct
+        ///for message in messages.iter() {
+        ///    if let Some(tbd_) = message.get("tbd") {
+        ///       tbd = tbd.push((tbd_[0].to_string(),tbd[1].to_string()));
+        ///       ///rimuovere il tbd da message
+        ///    }
+        ///}
+        //let step1 = Self::Step1((messages, tbd).into_map());
         let step1 = Self::Step1(messages.into_map());
         step1
     }
@@ -52,13 +65,19 @@ impl<'a> Parser<'a> {
         match self {
             Self::Step1(messages) => {
                 let frames = Frames::from_step_1(test, messages.clone());
+                //let mut tbd: Vec<(String, String)> = Vec::new();
+                //for (key, value) in messages {
+                //    tbd.append(&mut value.1);
+                //}
+                /// messages deve essere HashMap<String, AnyMessage<'a>> quindi bisogna rifare
+                /// l'hashmap togliendo Vec<(String,String)> e mettendolo in un tbd
                 Self::Step2 {
                     messages,
                     frames: frames.frames,
                 }
             }
-            Self::Step2 { messages, frames } => {
-                let actions = actions::ActionParser::from_step_3(test, frames.clone());
+            Self::Step2 { messages, frames, tbd } => {
+                let actions = actions::ActionParser::from_step_2(test, frames.clone());
                 Self::Step3 {
                     messages,
                     frames,

@@ -33,7 +33,7 @@ pub struct Executor {
 
 impl Executor {
     pub async fn new(test: Test<'static>, test_name: String) -> Executor {
-        let save: HashMap<String, String> = HashMap::new();
+        let mut save: HashMap<String, String> = HashMap::new();
         let mut process: Vec<Option<tokio::process::Child>> = vec![];
         for command in test.setup_commmands {
             if command.command == "kill" {

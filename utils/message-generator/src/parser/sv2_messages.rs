@@ -89,6 +89,8 @@ struct JobNegotiationMessage<'a> {
     #[serde(borrow)]
     message: JobNegotiation<'a>,
     id: String,
+    // filed_name, keyword
+    tbd: Option<Vec<(String,String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +98,8 @@ struct MiningMessage<'a> {
     #[serde(borrow)]
     message: Mining<'a>,
     id: String,
+    // filed_name, keyword
+    tbd: Option<Vec<(String,String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,40 +107,46 @@ struct TemplateDistributionMessage<'a> {
     #[serde(borrow)]
     message: TemplateDistribution<'a>,
     id: String,
+    // filed_name, keyword
+    tbd: Option<Vec<(String,String)>>,
 }
 
 impl<'a> TestMessageParser<'a> {
-    pub fn into_map(self) -> HashMap<String, AnyMessage<'a>> {
+    pub fn into_map(self) -> HashMap<String, (AnyMessage<'a>,Vec<(String,String)>)> {
         let mut map = HashMap::new();
         if let Some(common_messages) = self.common_messages {
             for message in common_messages {
                 let id = message.id;
+                let tbd = message.tbd;
                 let message = message.message.into();
-                map.insert(id, message);
+                map.insert(id, (message, tbd));
             }
         };
         if let Some(job_negotiation_messages) = self.job_negotiation_messages {
             for message in job_negotiation_messages {
                 let id = message.id;
+                let tbd = message.tbd;
                 let message = message.message.into();
                 let message = AnyMessage::JobNegotiation(message);
-                map.insert(id, message);
+                map.insert(id, (message, tbd));
             }
         };
         if let Some(mining_messages) = self.mining_messages {
             for message in mining_messages {
                 let id = message.id;
+                let tbd = message.tbd;
                 let message = message.message.into();
                 let message = AnyMessage::Mining(message);
-                map.insert(id, message);
+                map.insert(id, (message, tbd));
             }
         };
         if let Some(template_distribution_messages) = self.template_distribution_messages {
             for message in template_distribution_messages {
                 let id = message.id;
+                let tbd = message.tbd;
                 let message = message.message.into();
                 let message = AnyMessage::TemplateDistribution(message);
-                map.insert(id, message);
+                map.insert(id, (message, tbd));
             }
         };
         map
