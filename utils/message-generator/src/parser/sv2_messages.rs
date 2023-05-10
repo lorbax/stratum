@@ -18,6 +18,7 @@ pub fn message_from_path(path: &Vec<String>) -> AnyMessage<'static> {
         .into_map()
         .get(&id)
         .expect("There is no value matching the id {:?}")
+        .0
         .clone()
 }
 
@@ -81,7 +82,7 @@ struct CommonMessage<'a> {
     message: CommonMessages<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Option<Vec<(String,String)>>,
+    tbd: Vec<(String,String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,7 +91,7 @@ struct JobNegotiationMessage<'a> {
     message: JobNegotiation<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Option<Vec<(String,String)>>,
+    tbd: Vec<(String,String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +100,7 @@ struct MiningMessage<'a> {
     message: Mining<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Option<Vec<(String,String)>>,
+    tbd: Vec<(String,String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +109,7 @@ struct TemplateDistributionMessage<'a> {
     message: TemplateDistribution<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Option<Vec<(String,String)>>,
+    tbd: Vec<(String,String)>,
 }
 
 impl<'a> TestMessageParser<'a> {

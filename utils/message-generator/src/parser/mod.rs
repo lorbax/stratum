@@ -17,7 +17,7 @@ pub enum Parser<'a> {
     /// Parses any number or combination of messages to be later used by an action identified by
     /// message id.
     /// TODO scrivere a cosa corrispodono i campi di Vec<(String, Strin)>
-    Step1(HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)>,
+    Step1(HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)>),
     /// Serializes messages into `Sv2Frames` identified by message id.
     Step2 {
         /// il secondo Vec<(String,String)> corrisponde al tbd 
@@ -76,8 +76,8 @@ impl<'a> Parser<'a> {
                     frames: frames.frames,
                 }
             }
-            Self::Step2 { messages, frames, tbd } => {
-                let actions = actions::ActionParser::from_step_2(test, frames.clone());
+            Self::Step2 { messages, frames} => {
+                let actions = actions::ActionParser::from_step_2(test, frames.clone(), messages.clone());
                 Self::Step3 {
                     messages,
                     frames,

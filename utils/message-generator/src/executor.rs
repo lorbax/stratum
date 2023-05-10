@@ -135,9 +135,8 @@ impl Executor {
         }
     }
 
-    pub async fn execute(self) {
+    pub async fn execute(mut self) {
         let mut success = true;
-        let mut variables_stored = HashMap::new();
         for action in self.actions {
             if let Some(T) = action.actiondoc {
                 println!("{}", T);
@@ -162,10 +161,25 @@ impl Executor {
                 Role::Proxy => panic!("Action can be either executed as Downstream or Upstream"),
             };
             for message in action.messages {
-                println!("SEND {:#?}", message);
-                match sender.send(message).await {
-                    Ok(_) => (),
-                    Err(_) => panic!(),
+                for tbd in message.2 {
+                    let key = tbd.1.clone();
+                    let field = tbd.0;
+                    if let Some(value) = self.save.get(&tbd.1) {
+                        let message_as_serde_value = serde_json::value::to_value(message.1).unwrap();
+                        let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                        let message: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
+                        println!("{:#?}", message);
+                        
+
+                        todo!();
+                        //println!("SEND {:#?}", message);
+                        //match sender.send(message.0).await {
+                        //    Ok(_) => (),
+                        //    Err(_) => panic!(),
+                        //}
+                    } else {
+                        panic!("message incomplete, tbd not found");
+                    }
                 }
             }
             let mut rs = 0;
@@ -473,16 +487,17 @@ impl Executor {
                     ActionResult::GetMessageField{
                         subprotocol, 
                         message_type, 
-                        field
+                        fields
                         } => {
                         if subprotocol.as_str() == "CommonMessage" {
                             match (header.msg_type(), payload).try_into() {
                                 Ok(roles_logic_sv2::parsers::CommonMessages::SetupConnection(m)) => {
-                                    let mess = serde_json::to_value(&m).unwrap();
-                                    let field_name = field.0;
-                                    let key = field.1;
-                                    let to_save = message_to_value(&mess, &field.0);
-                                    self.save.insert(key,to_save);
+                                    //let mess = serde_json::to_value(&m).unwrap();
+                                    //for field in fields {
+                                    //    let field_name = field.clone().0;
+                                    //    let to_save = message_to_value(&mess, &field.0);
+                                    //    self.save.insert(key,to_save);
+                                    //}
                                 },
                                 _ => panic!(),
                             }
@@ -490,20 +505,34 @@ impl Executor {
                             match (header.msg_type(), payload).try_into() {
                                 Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(m)) => {
                                     let mess = serde_json::to_value(&m).unwrap();
-                                    let field_name = field.0;
-                                    let key = field.1;
-                                    let to_save = message_to_value(&mess, &field.0);
-                                    self.save.insert(key,to_save);
+                                    for field in fields {
+                                        let key = field.1.clone();
+                                        let field_name = &field.0;
+                                        let to_save = message_to_value(&mess, field_name);
+                                        self.save.insert(key,to_save);
+                                    }
                                 },
+
+                                    //(v_elem, w_elem) in v.iter_mut().zip(w.iter())
+                                    //for (frame, message, tbds) in test.action.messages.iter() {
+                                    //    for tbd in tbds.iter() {
+                                    //        if tbd.0 = key
+                                    //    if key 
+                                    //    for tbd in action.tbd_action.iter() {
+                                    //        if let Some(value) = save.get[key] {
+                                    //            todo!();
+                                    //            // modificare il messaggio, inserire nel k
+                                    //            
+
+                                    //        },
                                 _ => panic!(),
                             }
                         } else {
                             println!(
-                                "match_message_field subprotocol not valid - received: {}",
-                                subprotocol
+                                "GetMessageField not implemented for this protocol",
                             );
                             panic!()
-                        }
+                        };
                     }
                     ActionResult::MatchMessageLen(message_len) => {
                         if payload.len() != *message_len {

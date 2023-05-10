@@ -39,7 +39,7 @@ enum Sv2Type {
 enum ActionResult {
     MatchMessageType(u8),
     MatchMessageField((String, String, Vec<(String, Sv2Type)>)),
-    GetMessageField {subprotocol: String, message_type: String, field: Vec<(String,String)>},
+    GetMessageField {subprotocol: String, message_type: String, fields: Vec<(String,String)>},
     MatchMessageLen(usize),
     MatchExtensionType(u16),
     CloseConnection,
@@ -63,6 +63,9 @@ impl std::fmt::Display for ActionResult {
             }
             ActionResult::CloseConnection => write!(f, "Close connection"),
             ActionResult::None => write!(f, "None"),
+            ActionResult::GetMessageField {subprotocol, fields, ..} => {
+                write!(f, "GetMessageField: {:?} {:?}", subprotocol, fields)
+            }
         }
     }
 }
@@ -91,8 +94,9 @@ struct Downstream {
 #[derive(Debug)]
 /// mettere il tbd_action dentro messages`:
 pub struct Action<'a> {
-    messages: Vec<EitherFrame<AnyMessage<'a>>>,
-    tbd_action: Vec<(String,String)>,
+    // messages: Vec<EitherFrame<AnyMessage<'a>>>,
+    messages: Vec<(EitherFrame<AnyMessage<'a>>,AnyMessage<'a>,Vec<(String,String)>)>,
+    //tbd_action: Vec<(String,String)>,
     result: Vec<ActionResult>,
     role: Role,
     actiondoc: Option<String>,
