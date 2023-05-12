@@ -17,7 +17,7 @@ impl ActionParser {
         let test: Map<String, Value> = serde_json::from_str(test).unwrap();
         let actions = test.get("actions").unwrap().as_array().unwrap();
         let mut result = vec![];
-        let tbd_action: Vec<(String, String)> = Vec::new();
+        //let tbd_action: Vec<(String, String)> = Vec::new();
         for action in actions {
             let role = match action.get("role").unwrap().as_str().unwrap() {
                 "client" => Role::Downstream,
@@ -35,7 +35,12 @@ impl ActionParser {
                     .clone();
                 let frame = StandardEitherFrame::Sv2(frame);
                 let message = messages 
-                .get(id.as_str().unwrap())
+                .get(id.as_str().unwrap());
+                //println!("ACTIONS.RS");
+                //dbg!(&frame); 
+                //dbg!(&message);
+                //dbg!(id);
+                let message = message
                 .unwrap_or_else(|| {
                     panic!("Message id not found: {} Impossible to parse action", id)
                 })

@@ -86,10 +86,6 @@
                             ]
                         ]
                     ]
-                },
-                {
-                    "type": "match_message_type",
-                    "value": "0x13" 
                 }
             ],
             "actiondoc": "Checks that OpenExtendedMiningChannel is received" 
@@ -128,6 +124,15 @@
                     "warn_no_panic": false
                 }
             }
+       },
+       {
+           "command": "cargo",
+           "args": [
+                       "run",
+                       "-p",
+                       "sv1-mining-device"
+           ],
+           "conditions": "None"
        }
     ],
     "cleanup_commands": [

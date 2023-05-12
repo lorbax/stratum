@@ -64,19 +64,23 @@ impl<'a> Parser<'a> {
     fn next_step<'b: 'a>(self, test: &'b str) -> Self {
         match self {
             Self::Step1(messages) => {
-                let frames = Frames::from_step_1(test, messages.clone());
+                //println!("STEP 1");
+                //dbg!(messages.clone());
+                let (frames, messages) = Frames::from_step_1(test, messages.clone());
                 //let mut tbd: Vec<(String, String)> = Vec::new();
                 //for (key, value) in messages {
                 //    tbd.append(&mut value.1);
                 //}
-                /// messages deve essere HashMap<String, AnyMessage<'a>> quindi bisogna rifare
-                /// l'hashmap togliendo Vec<(String,String)> e mettendolo in un tbd
+                // messages deve essere HashMap<String, AnyMessage<'a>> quindi bisogna rifare
+                // l'hashmap togliendo Vec<(String,String)> e mettendolo in un tbd
                 Self::Step2 {
                     messages,
                     frames: frames.frames,
                 }
             }
             Self::Step2 { messages, frames} => {
+                //println!("STEP 2");
+                //dbg!(messages.clone());
                 let actions = actions::ActionParser::from_step_2(test, frames.clone(), messages.clone());
                 Self::Step3 {
                     messages,

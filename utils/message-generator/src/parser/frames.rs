@@ -9,10 +9,13 @@ pub struct Frames<'a> {
 }
 
 impl<'a> Frames<'a> {
-    pub fn from_step_1<'b: 'a>(test: &'b str, messages: HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)> ) -> Self {
+    pub fn from_step_1<'b: 'a>(test: &'b str, messages: HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)> ) -> (Self, HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)>) {
         let test: Map<String, Value> = serde_json::from_str(test).unwrap();
         let frames = test.get("frame_builders").unwrap().as_array().unwrap();
+        let mut messages = messages.clone();
 
+        //println!("BBBBBB messages senza SetupConnectionSuccess");
+        //dbg!(messages.clone());
         let mut result = HashMap::new();
         for frame in frames {
             let id: Vec<String> = frame
@@ -35,16 +38,21 @@ impl<'a> Frames<'a> {
                         .unwrap_or_else(|| panic!("Missing messages message_id {}", id[0]))
                         .0
                         .clone(),
-                    id[0].clone(),
+                    id[0].clone()
                 ),
                 2 => {
-                    /// the function "message_from_id" returns a an AnyMessage from the path in
-                    /// input
+                    // the function "message_from_id" returns a an AnyMessage from the path in
+                    // input
                     let mut path = id[0].clone();
                     std::string::String::insert_str(&mut path, 0, "../../../../");
                     let message = message_from_path(&vec![path, id[1].clone()]);
-                    let id = id[1].clone();
-                    (message, id)
+                    //println!("FRAMES.RS");
+                    //dbg!(id.clone());
+                    //dbg!(&message);
+                    // TODO: if a message is taken from a module, should it be allowed to have a
+                    // tbd? perhaps not. In this case, check that no tbd-field appears in message
+                    messages.insert(id[1].clone(), (message.clone(), vec![]));
+                    (message, id[1].clone())
                 }
                 _ => panic!("The length if id vector should have length equal or less than 2"),
             };
@@ -73,6 +81,9 @@ impl<'a> Frames<'a> {
                 _ => panic!("Unrecognized frames parsing type {}", type_),
             }
         }
-        Frames { frames: result }
+
+        //println!("CCCCCCCC messages con SetupConnectionSuccess");
+        //dbg!(messages.clone());
+        (Frames { frames: result }, messages)
     }
 }

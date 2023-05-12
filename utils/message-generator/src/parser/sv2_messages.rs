@@ -82,7 +82,7 @@ struct CommonMessage<'a> {
     message: CommonMessages<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Vec<(String,String)>,
+    tbd: Option<Vec<(String,String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +91,7 @@ struct JobNegotiationMessage<'a> {
     message: JobNegotiation<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Vec<(String,String)>,
+    tbd: Option<Vec<(String,String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ struct MiningMessage<'a> {
     message: Mining<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Vec<(String,String)>,
+    tbd: Option<Vec<(String,String)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,7 +109,7 @@ struct TemplateDistributionMessage<'a> {
     message: TemplateDistribution<'a>,
     id: String,
     // filed_name, keyword
-    tbd: Vec<(String,String)>,
+    tbd: Option<Vec<(String,String)>>,
 }
 
 impl<'a> TestMessageParser<'a> {
@@ -118,7 +118,10 @@ impl<'a> TestMessageParser<'a> {
         if let Some(common_messages) = self.common_messages {
             for message in common_messages {
                 let id = message.id;
-                let tbd = message.tbd;
+                let tbd = match message.tbd {
+                    Some(tbd) => tbd,
+                    None => vec![],
+                };
                 let message = message.message.into();
                 map.insert(id, (message, tbd));
             }
@@ -126,7 +129,10 @@ impl<'a> TestMessageParser<'a> {
         if let Some(job_negotiation_messages) = self.job_negotiation_messages {
             for message in job_negotiation_messages {
                 let id = message.id;
-                let tbd = message.tbd;
+                let tbd = match message.tbd {
+                    Some(tbd) => tbd,
+                    None => vec![],
+                };
                 let message = message.message.into();
                 let message = AnyMessage::JobNegotiation(message);
                 map.insert(id, (message, tbd));
@@ -135,7 +141,10 @@ impl<'a> TestMessageParser<'a> {
         if let Some(mining_messages) = self.mining_messages {
             for message in mining_messages {
                 let id = message.id;
-                let tbd = message.tbd;
+                let tbd = match message.tbd {
+                    Some(tbd) => tbd,
+                    None => vec![],
+                };
                 let message = message.message.into();
                 let message = AnyMessage::Mining(message);
                 map.insert(id, (message, tbd));
@@ -144,7 +153,10 @@ impl<'a> TestMessageParser<'a> {
         if let Some(template_distribution_messages) = self.template_distribution_messages {
             for message in template_distribution_messages {
                 let id = message.id;
-                let tbd = message.tbd;
+                let tbd = match message.tbd {
+                    Some(tbd) => tbd,
+                    None => vec![],
+                };
                 let message = message.message.into();
                 let message = AnyMessage::TemplateDistribution(message);
                 map.insert(id, (message, tbd));

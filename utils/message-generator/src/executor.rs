@@ -138,8 +138,8 @@ impl Executor {
     pub async fn execute(mut self) {
         let mut success = true;
         for action in self.actions {
-            if let Some(T) = action.actiondoc {
-                println!("{}", T);
+            if let Some(doc) = action.actiondoc {
+                println!("actiondoc: {}", doc);
             }
             let (sender, recv) = match action.role {
                 Role::Upstream => (
@@ -161,24 +161,33 @@ impl Executor {
                 Role::Proxy => panic!("Action can be either executed as Downstream or Upstream"),
             };
             for message in action.messages {
-                for tbd in message.2 {
-                    let key = tbd.1.clone();
-                    let field = tbd.0;
-                    if let Some(value) = self.save.get(&tbd.1) {
-                        let message_as_serde_value = serde_json::value::to_value(message.1).unwrap();
-                        let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                        let message: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
-                        println!("{:#?}", message);
-                        
-
-                        todo!();
-                        //println!("SEND {:#?}", message);
-                        //match sender.send(message.0).await {
-                        //    Ok(_) => (),
-                        //    Err(_) => panic!(),
-                        //}
-                    } else {
-                        panic!("message incomplete, tbd not found");
+                //dbg!(message.1); // setup connection success
+                //dbg!(message.2); // vettore vuoto, quello che c'e' dopo lo salta e va
+                //direttamente a riga 190: for result in &action.result 
+                //panic!();
+                if message.2.len() == 0 {
+                   println!("SEND {:#?}", message);
+                   match sender.send(message.0).await {
+                       Ok(_) => (),
+                       Err(_) => panic!(),
+                   }
+                } else {
+                    for tbd in message.2 {
+                        let key = tbd.1.clone();
+                        let field = tbd.0;
+                        if let Some(value) = self.save.get(&tbd.1) {
+                            println!("CANE DEL DIO INFAME");
+                            let message_as_serde_value = serde_json::value::to_value(&message.1).unwrap();
+                            let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                            let message_: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
+                            //println!("SEND {:#?}", message);
+                            //match sender.send(message.0).await {
+                            //    Ok(_) => (),
+                            //    Err(_) => panic!(),
+                            //}
+                        } else {
+                            panic!("message incomplete, tbd not found");
+                        }
                     }
                 }
             }
@@ -195,6 +204,7 @@ impl Executor {
                         .expect_err("Expecting the connection to be closed: wasn't");
                     break;
                 }
+                //println!("AAAAAAA");
 
                 let message = match recv.recv().await {
                     Ok(message) => message,
@@ -204,20 +214,17 @@ impl Executor {
                         break;
                     },
                 };
-                println!("AAAAAA");
-                dbg!(&message);
+                //println!("BBBBBB");
+                //dbg!(&message);
                 let mut message: Sv2Frame<AnyMessage<'static>, _> = message.try_into().unwrap();
                 println!("RECV {:#?}", message);
                 let header = message.get_header().unwrap();
-                dbg!(header);
                 let payload = message.payload();
-                println!("AAAAAA PAYLOAD");
-                dbg!(&payload);
-                print_type_of(&payload);
+                // next function print type of variables
+                //print_type_of(&payload);
                 let mut message_hashmap: HashMap<std::string::String, PoolMessages<'static>> = HashMap::new();
-                if header.msg_type() == 19 {
-                    println!("CIAO GIGI");
-                }
+                println!("prima di matchare il result");
+                dbg!(result);
                 match result {
                     ActionResult::MatchMessageType(message_type) => {
                         if header.msg_type() != *message_type {
@@ -502,6 +509,7 @@ impl Executor {
                                 _ => panic!(),
                             }
                         } else if subprotocol.as_str() == "MiningProtocol" {
+                            println!("GetMessageField dio merda");
                             match (header.msg_type(), payload).try_into() {
                                 Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(m)) => {
                                     let mess = serde_json::to_value(&m).unwrap();
