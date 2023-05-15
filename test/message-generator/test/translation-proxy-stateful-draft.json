@@ -94,7 +94,7 @@
             "message_ids": ["open_extended_mining_channel_success"],
             "role": "server",
             "results": [],
-            "actiondoc": "This action responds with OpenExtendedMiningChannelSuccess" 
+            "actiondoc": "This action gets the field request_id" 
         }
     ],
     "setup_commands": [

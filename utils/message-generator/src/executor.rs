@@ -11,6 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::any::type_name;
+use serde_json::{json};
+
+//use crate::TestMessageParser;
 
 use std::time::Duration;
 use tokio::{fs::File, io::{copy, BufWriter, BufReader}, time::timeout};
@@ -160,26 +163,58 @@ impl Executor {
                 ),
                 Role::Proxy => panic!("Action can be either executed as Downstream or Upstream"),
             };
-            for message in action.messages {
+            for message_ in action.messages {
+                let tbds = message_.2.clone();
+                let message = message_.1.clone();
+                let frame = message_.0;
                 //dbg!(message.1); // setup connection success
                 //dbg!(message.2); // vettore vuoto, quello che c'e' dopo lo salta e va
                 //direttamente a riga 190: for result in &action.result 
                 //panic!();
-                if message.2.len() == 0 {
+                if tbds.len() == 0 {
                    println!("SEND {:#?}", message);
-                   match sender.send(message.0).await {
+                   match sender.send(frame).await {
                        Ok(_) => (),
                        Err(_) => panic!(),
                    }
                 } else {
-                    for tbd in message.2 {
-                        let key = tbd.1.clone();
-                        let field = tbd.0;
-                        if let Some(value) = self.save.get(&tbd.1) {
-                            println!("CANE DEL DIO INFAME");
-                            let message_as_serde_value = serde_json::value::to_value(&message.1).unwrap();
+                    for tbd in &tbds {
+                        //let key = tbd.1.clone();
+                        //let field = &tbd.0;
+                        if let Some(value) = self.save.get(&tbd.1) { 
+                            println!("CANE DEL DIO INFAME"); 
+                            dbg!(&message);
+                            //dbg!(&field);
+                            //dbg!(&key);
+                            //dbg!(&value);
+                            
+                            let mut message_as_serde_value = serde_json::to_value(&message).unwrap();
+                            dbg!(&message_as_serde_value);
+                            
+                            match message_as_serde_value.pointer_mut(&format!("/Mining/OpenExtendedMiningChannelSuccess/{}", tbd.0.as_str())) {
+                                Some(field_value) => {
+                                    let value = value.parse::<i32>().unwrap();
+                                    *field_value = json!(value);
+                                }
+                                _ => panic!("value not found")
+                            }
+                            dbg!(&message_as_serde_value);
+
+                            //let _message_as_serde_value = message_as_serde_value.clone();
+                            //let _message: AnyMessage<'_> = serde_json::from_value(_message_as_serde_value).unwrap();
+                            //dbg!(&_message);
+                            
                             let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                            dbg!(&message_as_string);
+
+                            //let mut message_as_string = "{\"Mining\":{\"OpenExtendedMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":0,\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}}";
+                            //let message_as_string: &str = &message_as_string[1..message_as_string.len()-1];
+
                             let message_: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
+                            println!("stampa messaggio");
+                            dbg!(&message_);
+//"{\"Mining\":{\"OpenExtendedMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":\"0\",\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}}"
+
                             //println!("SEND {:#?}", message);
                             //match sender.send(message.0).await {
                             //    Ok(_) => (),
@@ -223,8 +258,8 @@ impl Executor {
                 // next function print type of variables
                 //print_type_of(&payload);
                 let mut message_hashmap: HashMap<std::string::String, PoolMessages<'static>> = HashMap::new();
-                println!("prima di matchare il result");
-                dbg!(result);
+                //println!("prima di matchare il result");
+                //dbg!(result);
                 match result {
                     ActionResult::MatchMessageType(message_type) => {
                         if header.msg_type() != *message_type {
