@@ -250,7 +250,7 @@ mod test {
 
         let v: TestMessageParser = serde_json::from_str(data).unwrap();
         let v = v.into_map();
-        match v.get("setup_connection").unwrap() {
+        match v.get("setup_connection").unwrap().0 {
             AnyMessage::Common(
                 roles_logic_sv2::parsers::CommonMessages::SetupConnectionSuccess(m),
             ) => {
@@ -259,7 +259,7 @@ mod test {
             }
             _ => panic!(),
         }
-        match v.get("close_channel").unwrap() {
+        match &v.get("close_channel").unwrap().0 {
             AnyMessage::Mining(roles_logic_sv2::parsers::Mining::CloseChannel(m)) => {
                 assert!(m.channel_id == 78);
                 let reason_code = m.reason_code.to_vec().clone();
@@ -268,6 +268,24 @@ mod test {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn test_1() {
+        let data = r#"
+                        {
+                            "CloseChannel": {
+                                "channel_id": 78,
+                                "reason_code": "no reason"
+                            }
+                        }
+        "#;
+
+
+        let message_: roles_logic_sv2::parsers::Mining<'_> = serde_json::from_str(&data).unwrap();
+
+        //let message_as_string = r#"il tuo json"#;
+        //let message_: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
     }
 }
 use roles_logic_sv2::{

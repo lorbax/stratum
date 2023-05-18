@@ -3,9 +3,11 @@ use crate::{
     net::{setup_as_downstream, setup_as_upstream},
     Action, ActionResult, Command, Role, Sv2Type, Test,
 };
+use codec_sv2::{buffer_sv2::Slice, StandardEitherFrame};
+
 use async_channel::{Receiver, Sender};
 use codec_sv2::{Frame, StandardEitherFrame as EitherFrame, Sv2Frame};
-use roles_logic_sv2::parsers::{AnyMessage, PoolMessages};
+use roles_logic_sv2::parsers::{AnyMessage, PoolMessages, CommonMessages};
 use std::convert::TryInto;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -178,6 +180,7 @@ impl Executor {
                        Err(_) => panic!(),
                    }
                 } else {
+                    let mut sv2_message_to_be_completed = message.clone();
                     for tbd in &tbds {
                         //let key = tbd.1.clone();
                         //let field = &tbd.0;
@@ -188,41 +191,73 @@ impl Executor {
                             //dbg!(&key);
                             //dbg!(&value);
                             
-                            let mut message_as_serde_value = serde_json::to_value(&message).unwrap();
-                            dbg!(&message_as_serde_value);
-                            
-                            match message_as_serde_value.pointer_mut(&format!("/Mining/OpenExtendedMiningChannelSuccess/{}", tbd.0.as_str())) {
-                                Some(field_value) => {
-                                    let value = value.parse::<i32>().unwrap();
-                                    *field_value = json!(value);
-                                }
-                                _ => panic!("value not found")
-                            }
-                            dbg!(&message_as_serde_value);
+                            sv2_message_to_be_completed = match message.clone() {
+                                AnyMessage::Common(m) => {
+                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+                                     
+                                    match message_as_serde_value.pointer_mut(&format!("/Mining/OpenExtendedMiningChannelSuccess/{}", tbd.0.as_str())) {
+                                      Some(field_value) => {
+                                          let value = value.parse::<i32>().unwrap();
+                                          *field_value = json!(value);
+                                      }
+                                      _ => panic!("value not found")
+                                  }
+                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                                    AnyMessage::Common(serde_json::from_str(&message_as_string).unwrap())
+                                },
+                                AnyMessage::Mining(m) => {
+                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                                    AnyMessage::Mining(serde_json::from_str(&message_as_string).unwrap())
+                                },
+                               AnyMessage::JobNegotiation(m) => {
+                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                                    AnyMessage::JobNegotiation(serde_json::from_str(&message_as_string).unwrap())
+                                },
+                                AnyMessage::TemplateDistribution(m) => {
+                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                                 AnyMessage::TemplateDistribution(serde_json::from_str(&message_as_string).unwrap())
+                                },
 
-                            //let _message_as_serde_value = message_as_serde_value.clone();
-                            //let _message: AnyMessage<'_> = serde_json::from_value(_message_as_serde_value).unwrap();
-                            //dbg!(&_message);
-                            
-                            let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                            dbg!(&message_as_string);
-
-                            //let mut message_as_string = "{\"Mining\":{\"OpenExtendedMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":0,\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}}";
-                            //let message_as_string: &str = &message_as_string[1..message_as_string.len()-1];
-
-                            let message_: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
-                            println!("stampa messaggio");
-                            dbg!(&message_);
-//"{\"Mining\":{\"OpenExtendedMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":\"0\",\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}}"
-
-                            //println!("SEND {:#?}", message);
-                            //match sender.send(message.0).await {
-                            //    Ok(_) => (),
-                            //    Err(_) => panic!(),
+                            };
+                            //let mut message_as_serde_value = serde_json::to_value(&message).unwrap();
+                            //dbg!(&message_as_serde_value);
+                            //
+                            //match message_as_serde_value.pointer_mut(&format!("/Mining/OpenExtendedMiningChannelSuccess/{}", tbd.0.as_str())) {
+                            //    Some(field_value) => {
+                            //        let value = value.parse::<i32>().unwrap();
+                            //        *field_value = json!(value);
+                            //    }
+                            //    _ => panic!("value not found")
                             //}
+                            //dbg!(&message_as_serde_value);
+
+                            ////let _message_as_serde_value = message_as_serde_value.clone();
+                            ////let _message: AnyMessage<'_> = serde_json::from_value(_message_as_serde_value).unwrap();
+                            ////dbg!(&_message);
+                            //
+                            //let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+                            //dbg!(&message_as_string);
+
+                            //let message_as_string = "{\"OpenExtendedMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":0,\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}";
+                            ////let message_as_string: &str = &message_as_string[1..message_as_string.len()-1];
+
+                            //let message_: roles_logic_sv2::parsers::Mining<'_> = serde_json::from_str(&message_as_string).unwrap();
+                            //println!("stampa messaggio");
+                            //dbg!(&message_);
+//"{\"Mining\":{\"OpenExtend//edMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":\"0\",\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}}"
+
                         } else {
                             panic!("message incomplete, tbd not found");
                         }
+                    };
+                    let modified_frame = StandardEitherFrame::Sv2(sv2_message_to_be_completed.try_into().unwrap());
+                    println!("SEND {:#?}", message);
+                    match sender.send(modified_frame).await {
+                        Ok(_) => (),
+                        Err(_) => panic!(),
                     }
                 }
             }
