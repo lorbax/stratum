@@ -20,7 +20,7 @@ pub enum Parser<'a> {
     Step1(HashMap<String, (AnyMessage<'a>, Vec<(String, String)>)>),
     /// Serializes messages into `Sv2Frames` identified by message id.
     Step2 {
-        /// il secondo Vec<(String,String)> corrisponde al tbd 
+        /// il secondo Vec<(String,String)> corrisponde al tbd, filed_name, keyword 
         messages: HashMap<String, (AnyMessage<'a>,Vec<(String,String)>)>,
         frames: HashMap<String, Sv2Frame<AnyMessage<'a>, Slice>>,
     },

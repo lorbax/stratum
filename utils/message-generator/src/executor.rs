@@ -167,95 +167,24 @@ impl Executor {
                 Role::Proxy => panic!("Action can be either executed as Downstream or Upstream"),
             };
             for message_ in action.messages {
-                let tbds = message_.2.clone();
+                let tbd = message_.2.clone();
                 let message = message_.1.clone();
                 let frame = message_.0;
                 //dbg!(message.1); // setup connection success
                 //dbg!(message.2); // vettore vuoto, quello che c'e' dopo lo salta e va
-                //direttamente a riga 190: for result in &action.result 
-                //panic!();
-                if tbds.len() == 0 {
+                if tbd.len() == 0 {
                    println!("SEND {:#?}", message);
                    match sender.send(frame).await {
                        Ok(_) => (),
                        Err(_) => panic!(),
                    }
                 } else {
-                    let mut sv2_message_to_be_completed = message.clone();
-                    for tbd in &tbds {
-                        //let key = tbd.1.clone();
-                        //let field = &tbd.0;
-                        if let Some(value) = self.save.get(&tbd.1) { 
-                            println!("CANE DEL DIO INFAME"); 
-                            dbg!(&message);
-                            //dbg!(&field);
-                            //dbg!(&key);
-                            //dbg!(&value);
-                            
-                            sv2_message_to_be_completed = match message.clone() {
-                                AnyMessage::Common(m) => {
-                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
-                                     
-                                    match message_as_serde_value.pointer_mut(&format!("/Mining/OpenExtendedMiningChannelSuccess/{}", tbd.0.as_str())) {
-                                      Some(field_value) => {
-                                          let value = value.parse::<i32>().unwrap();
-                                          *field_value = json!(value);
-                                      }
-                                      _ => panic!("value not found")
-                                  }
-                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                    into_static(AnyMessage::Common(serde_json::from_str(&message_as_string).unwrap()))
-                                },
-                                AnyMessage::Mining(m) => {
-                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
-                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                    into_static(AnyMessage::Mining(serde_json::from_str(&message_as_string).unwrap()))
-                                },
-                               AnyMessage::JobNegotiation(m) => {
-                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
-                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                    into_static(AnyMessage::JobNegotiation(serde_json::from_str(&message_as_string).unwrap()))
-                                },
-                                AnyMessage::TemplateDistribution(m) => {
-                                    let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
-                                    let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                 into_static(AnyMessage::TemplateDistribution(serde_json::from_str(&message_as_string).unwrap()))
-                                },
-
-                            };
-                            //let mut message_as_serde_value = serde_json::to_value(&message).unwrap();
-                            //dbg!(&message_as_serde_value);
-                            //
-                            //match message_as_serde_value.pointer_mut(&format!("/Mining/OpenExtendedMiningChannelSuccess/{}", tbd.0.as_str())) {
-                            //    Some(field_value) => {
-                            //        let value = value.parse::<i32>().unwrap();
-                            //        *field_value = json!(value);
-                            //    }
-                            //    _ => panic!("value not found")
-                            //}
-                            //dbg!(&message_as_serde_value);
-
                             ////let _message_as_serde_value = message_as_serde_value.clone();
                             ////let _message: AnyMessage<'_> = serde_json::from_value(_message_as_serde_value).unwrap();
-                            ////dbg!(&_message);
-                            //
-                            //let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                            //dbg!(&message_as_string);
-
-                            //let message_as_string = "{\"OpenExtendedMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":0,\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}";
-                            ////let message_as_string: &str = &message_as_string[1..message_as_string.len()-1];
-
-                            //let message_: roles_logic_sv2::parsers::Mining<'_> = serde_json::from_str(&message_as_string).unwrap();
-                            //println!("stampa messaggio");
-                            //dbg!(&message_);
 //"{\"Mining\":{\"OpenExtend//edMiningChannelSuccess\":{\"channel_id\":1,\"extranonce_prefix\":[[16],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]],\"extranonce_size\":16,\"request_id\":\"0\",\"target\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255]}}}"
-
-                        } else {
-                            panic!("message incomplete, tbd not found");
-                        }
-                    };
-                    let modified_frame = StandardEitherFrame::Sv2(sv2_message_to_be_completed.try_into().unwrap());
-                    println!("SEND {:#?}", message);
+                    let message_modified = change_fields(message, tbd, self.save.clone());
+                    let modified_frame = StandardEitherFrame::Sv2(message_modified.clone().try_into().unwrap());
+                    println!("SEND {:#?}", message_modified);
                     match sender.send(modified_frame).await {
                         Ok(_) => (),
                         Err(_) => panic!(),
@@ -684,6 +613,51 @@ impl Executor {
             panic!("test failed!!!");
         }
     }
+}
+fn change_fields<'a>(m: AnyMessage<'a>, tbd: Vec<(String,String)>, values: HashMap<String, String>) -> AnyMessage<'static> {
+    let mut tbd = tbd.clone();
+    let next = tbd.pop().expect("tbd cannot be empty");
+    let keyword = next.1;
+    let field_name = next.0;
+    let value = values.get(&keyword).expect("value not found for the keyword");
+
+   match m.clone() {
+       AnyMessage::Common(m) => {
+           let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+           let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+           change_fields(into_static(AnyMessage::Mining(serde_json::from_str(&message_as_string).unwrap())), tbd, values)
+       },
+       AnyMessage::Mining(m) => {
+           let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+           dbg!(&values);
+           dbg!(&field_name);
+           dbg!(&message_as_serde_value);
+           match message_as_serde_value.pointer_mut(&format!("/OpenExtendedMiningChannelSuccess/{}", field_name.as_str())) {
+             Some(field_value) => {
+                 let value = value.parse::<i32>().unwrap();
+                 *field_value = json!(value);
+             }
+             _ => panic!("value not found")
+           }
+           let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+           let m_ = into_static(AnyMessage::Mining(serde_json::from_str(&message_as_string).unwrap()));
+           if tbd.len() == 0 {
+               return m_;
+           } else {
+               return change_fields(m_, tbd, values);
+           }
+       },
+       AnyMessage::JobNegotiation(m) => {
+           let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+           let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+           change_fields(into_static(AnyMessage::JobNegotiation(serde_json::from_str(&message_as_string).unwrap())), tbd, values)
+        },
+        AnyMessage::TemplateDistribution(m) => {
+           let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
+           let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
+           change_fields(into_static(AnyMessage::TemplateDistribution(serde_json::from_str(&message_as_string).unwrap())), tbd, values)
+        },
+   }
 }
 
 
