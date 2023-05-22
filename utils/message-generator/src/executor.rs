@@ -7,13 +7,14 @@ use codec_sv2::{buffer_sv2::Slice, StandardEitherFrame};
 
 use async_channel::{Receiver, Sender};
 use codec_sv2::{Frame, StandardEitherFrame as EitherFrame, Sv2Frame};
-use roles_logic_sv2::parsers::{AnyMessage, PoolMessages, CommonMessages};
+use roles_logic_sv2::{parsers::{AnyMessage, PoolMessages, CommonMessages, IsSv2Message, self}, common_messages_sv2::{SetupConnection, ChannelEndpointChanged, SetupConnectionError, SetupConnectionSuccess}, mining_sv2::{CloseChannel, NewExtendedMiningJob, NewMiningJob, OpenExtendedMiningChannel, OpenExtendedMiningChannelSuccess, OpenMiningChannelError, OpenStandardMiningChannel, OpenStandardMiningChannelSuccess, Reconnect, SetCustomMiningJob, SetCustomMiningJobError, SetCustomMiningJobSuccess, SetExtranoncePrefix, SetGroupChannel, SetNewPrevHash as MiningSetNewPrevHash, SetTarget, SubmitSharesError, SubmitSharesExtended, SubmitSharesStandard, SubmitSharesSuccess, UpdateChannel, UpdateChannelError}, job_negotiation_sv2::{AllocateMiningJobToken, AllocateMiningJobTokenSuccess, CommitMiningJob, CommitMiningJobSuccess}, template_distribution_sv2::{CoinbaseOutputDataSize, NewTemplate, RequestTransactionData, RequestTransactionDataError, RequestTransactionDataSuccess, SetNewPrevHash, SubmitSolution}};
 use std::convert::TryInto;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::any::type_name;
 use serde_json::{json};
+use crate::into_static::into_static;
 
 //use crate::TestMessageParser;
 
@@ -203,22 +204,22 @@ impl Executor {
                                       _ => panic!("value not found")
                                   }
                                     let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                    AnyMessage::Common(serde_json::from_str(&message_as_string).unwrap())
+                                    into_static(AnyMessage::Common(serde_json::from_str(&message_as_string).unwrap()))
                                 },
                                 AnyMessage::Mining(m) => {
                                     let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
                                     let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                    AnyMessage::Mining(serde_json::from_str(&message_as_string).unwrap())
+                                    into_static(AnyMessage::Mining(serde_json::from_str(&message_as_string).unwrap()))
                                 },
                                AnyMessage::JobNegotiation(m) => {
                                     let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
                                     let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                    AnyMessage::JobNegotiation(serde_json::from_str(&message_as_string).unwrap())
+                                    into_static(AnyMessage::JobNegotiation(serde_json::from_str(&message_as_string).unwrap()))
                                 },
                                 AnyMessage::TemplateDistribution(m) => {
                                     let mut message_as_serde_value = serde_json::to_value(&m).unwrap();
                                     let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-                                 AnyMessage::TemplateDistribution(serde_json::from_str(&message_as_string).unwrap())
+                                 into_static(AnyMessage::TemplateDistribution(serde_json::from_str(&message_as_string).unwrap()))
                                 },
 
                             };
@@ -316,25 +317,25 @@ impl Executor {
                     )) => {
                         if subprotocol.as_str() == "CommonMessage" {
                             match (header.msg_type(), payload).try_into() {
-                                Ok(roles_logic_sv2::parsers::CommonMessages::SetupConnection(m)) => {
+                                Ok(parsers::CommonMessages::SetupConnection(m)) => {
                                     if message_type.as_str() == "SetupConnection" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::CommonMessages::SetupConnectionError(m)) => {
+                                Ok(parsers::CommonMessages::SetupConnectionError(m)) => {
                                     if message_type.as_str() == "SetupConnectionError" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::CommonMessages::SetupConnectionSuccess(m)) => {
+                                Ok(parsers::CommonMessages::SetupConnectionSuccess(m)) => {
                                     if message_type.as_str() == "SetupConnectionSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::CommonMessages::ChannelEndpointChanged(m)) => {
+                                Ok(parsers::CommonMessages::ChannelEndpointChanged(m)) => {
                                     if message_type.as_str() == "ChannelEndpointChanged" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
@@ -344,134 +345,134 @@ impl Executor {
                             }
                         } else if subprotocol.as_str() == "MiningProtocol" {
                             match (header.msg_type(), payload).try_into() {
-                                Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(m)) => {
+                                Ok(parsers::Mining::OpenExtendedMiningChannel(m)) => {
                                     print_type_of(&m);
                                     if message_type.as_str() == "OpenExtendedMiningChannel" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannelSuccess(m)) => {
+                                Ok(parsers::Mining::OpenExtendedMiningChannelSuccess(m)) => {
                                     if message_type.as_str() == "OpenExtendedMiningChannelSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::OpenStandardMiningChannel(m)) => {
+                                Ok(parsers::Mining::OpenStandardMiningChannel(m)) => {
                                     if message_type.as_str() == "OpenStandardMiningChannel" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::OpenStandardMiningChannelSuccess(m)) => {
+                                Ok(parsers::Mining::OpenStandardMiningChannelSuccess(m)) => {
                                     if message_type.as_str() == "OpenStandardMiningChannelSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg,field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::CloseChannel(m)) => {
+                                Ok(parsers::Mining::CloseChannel(m)) => {
                                     if message_type.as_str() == "CloseChannel" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::NewMiningJob(m)) => {
+                                Ok(parsers::Mining::NewMiningJob(m)) => {
                                     if message_type.as_str() == "NewMiningJob" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::NewExtendedMiningJob(m)) => {
+                                Ok(parsers::Mining::NewExtendedMiningJob(m)) => {
                                     if message_type.as_str() == "NewExtendedMiningJob" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetTarget(m)) => {
+                                Ok(parsers::Mining::SetTarget(m)) => {
                                     if message_type.as_str() == "SetTarget" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SubmitSharesError(m)) => {
+                                Ok(parsers::Mining::SubmitSharesError(m)) => {
                                     if message_type.as_str() == "SubmitSharesError" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SubmitSharesStandard(m)) => {
+                                Ok(parsers::Mining::SubmitSharesStandard(m)) => {
                                     if message_type.as_str() == "SubmitSharesStandard" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SubmitSharesSuccess(m)) => {
+                                Ok(parsers::Mining::SubmitSharesSuccess(m)) => {
                                     if message_type.as_str() == "SubmitSharesSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SubmitSharesExtended(m)) => {
+                                Ok(parsers::Mining::SubmitSharesExtended(m)) => {
                                     if message_type.as_str() == "SubmitSharesExtended" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetCustomMiningJob(m)) => {
+                                Ok(parsers::Mining::SetCustomMiningJob(m)) => {
                                     if message_type.as_str() == "SetCustomMiningJob" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetCustomMiningJobError(m)) => {
+                                Ok(parsers::Mining::SetCustomMiningJobError(m)) => {
                                     if message_type.as_str() == "SetCustomMiningJobError" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::OpenMiningChannelError(m)) => {
+                                Ok(parsers::Mining::OpenMiningChannelError(m)) => {
                                     if message_type.as_str() == "OpenMiningChannelError" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::Reconnect(m)) => {
+                                Ok(parsers::Mining::Reconnect(m)) => {
                                     if message_type.as_str() == "Reconnect" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetCustomMiningJobSuccess(m)) => {
+                                Ok(parsers::Mining::SetCustomMiningJobSuccess(m)) => {
                                     if message_type.as_str() == "SetCustomMiningJobSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetExtranoncePrefix(m)) => {
+                                Ok(parsers::Mining::SetExtranoncePrefix(m)) => {
                                     if message_type.as_str() == "SetExtranoncePrefix" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetGroupChannel(m)) => {
+                                Ok(parsers::Mining::SetGroupChannel(m)) => {
                                     if message_type.as_str() == "SetGroupChannel" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::SetNewPrevHash(m)) => {
+                                Ok(parsers::Mining::SetNewPrevHash(m)) => {
                                     if message_type.as_str() == "SetNewPrevHash" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::UpdateChannel(m)) => {
+                                Ok(parsers::Mining::UpdateChannel(m)) => {
                                     if message_type.as_str() == "UpdateChannel" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::Mining::UpdateChannelError(m)) => {
+                                Ok(parsers::Mining::UpdateChannelError(m)) => {
                                     if message_type.as_str() == "UpdateChannelError" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
@@ -481,25 +482,25 @@ impl Executor {
                             }
                         } else if subprotocol.as_str() == "JobNegotiationProtocol" {
                             match (header.msg_type(), payload).try_into() {
-                                Ok(roles_logic_sv2::parsers::JobNegotiation::AllocateMiningJobTokenSuccess(m)) => {
+                                Ok(parsers::JobNegotiation::AllocateMiningJobTokenSuccess(m)) => {
                                     if message_type.as_str() == "AllocateMiningJobTokenSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 }
-                                Ok(roles_logic_sv2::parsers::JobNegotiation::AllocateMiningJobToken(m)) => {
+                                Ok(parsers::JobNegotiation::AllocateMiningJobToken(m)) => {
                                     if message_type.as_str() == "AllocateMiningJobToken" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 }
-                                Ok(roles_logic_sv2::parsers::JobNegotiation::CommitMiningJob(m)) => {
+                                Ok(parsers::JobNegotiation::CommitMiningJob(m)) => {
                                     if message_type.as_str() == "CommitMiningJob" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 }
-                                Ok(roles_logic_sv2::parsers::JobNegotiation::CommitMiningJobSuccess(m)) => {
+                                Ok(parsers::JobNegotiation::CommitMiningJobSuccess(m)) => {
                                     if message_type.as_str() == "CommitMiningJobSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
@@ -509,43 +510,43 @@ impl Executor {
                             }
                         } else if subprotocol.as_str() == "TemplateDistributionProtocol" {
                             match (header.msg_type(), payload).try_into() {
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::SubmitSolution(m)) => {
+                                Ok(parsers::TemplateDistribution::SubmitSolution(m)) => {
                                     if message_type.as_str() == "SubmitSolution" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::NewTemplate(m)) => {
+                                Ok(parsers::TemplateDistribution::NewTemplate(m)) => {
                                     if message_type.as_str() == "NewTemplate" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::SetNewPrevHash(m)) => {
+                                Ok(parsers::TemplateDistribution::SetNewPrevHash(m)) => {
                                     if message_type.as_str() == "SetNewPrevHash" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::CoinbaseOutputDataSize(m)) => {
+                                Ok(parsers::TemplateDistribution::CoinbaseOutputDataSize(m)) => {
                                     if message_type.as_str() == "CoinbaseOutputDataSize" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::RequestTransactionData(m)) => {
+                                Ok(parsers::TemplateDistribution::RequestTransactionData(m)) => {
                                     if message_type.as_str() == "RequestTransactionData" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::RequestTransactionDataError(m)) => {
+                                Ok(parsers::TemplateDistribution::RequestTransactionDataError(m)) => {
                                     if message_type.as_str() == "RequestTransactionDataError" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
                                     }
                                 },
-                                Ok(roles_logic_sv2::parsers::TemplateDistribution::RequestTransactionDataSuccess(m)) => {
+                                Ok(parsers::TemplateDistribution::RequestTransactionDataSuccess(m)) => {
                                     if message_type.as_str() == "RequestTransactionDataSuccess" {
                                         let msg = serde_json::to_value(&m).unwrap();
                                         check_each_field(msg, field_data);
@@ -568,7 +569,7 @@ impl Executor {
                         } => {
                         if subprotocol.as_str() == "CommonMessage" {
                             match (header.msg_type(), payload).try_into() {
-                                Ok(roles_logic_sv2::parsers::CommonMessages::SetupConnection(m)) => {
+                                Ok(parsers::CommonMessages::SetupConnection(m)) => {
                                     //let mess = serde_json::to_value(&m).unwrap();
                                     //for field in fields {
                                     //    let field_name = field.clone().0;
@@ -581,7 +582,7 @@ impl Executor {
                         } else if subprotocol.as_str() == "MiningProtocol" {
                             println!("GetMessageField dio merda");
                             match (header.msg_type(), payload).try_into() {
-                                Ok(roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(m)) => {
+                                Ok(parsers::Mining::OpenExtendedMiningChannel(m)) => {
                                     let mess = serde_json::to_value(&m).unwrap();
                                     for field in fields {
                                         let key = field.1.clone();
@@ -684,6 +685,7 @@ impl Executor {
         }
     }
 }
+
 
 fn check_msg_field(msg: serde_json::Value, field_name: &str, value_type: &str, field: &Sv2Type) {
     let msg = msg.as_object().unwrap();

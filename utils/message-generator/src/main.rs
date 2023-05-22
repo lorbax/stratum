@@ -2,7 +2,7 @@ mod executor;
 mod external_commands;
 mod net;
 mod parser;
-
+mod into_static;
 #[macro_use]
 extern crate load_file;
 
