@@ -461,7 +461,8 @@ impl<'s> Seq064K<'s, ShortTxId<'s>> {
     pub fn into_static(self) -> Seq064K<'static, ShortTxId<'static>> {
         if let Some(inner) = self.data {
             let inner = inner.clone();
-            let data: Vec<ShortTxId<'static>> = inner.into_iter().map(|i| i.into_static()).collect();
+            let data: Vec<ShortTxId<'static>> =
+                inner.into_iter().map(|i| i.into_static()).collect();
             Seq064K {
                 seq: None,
                 data: Some(data),

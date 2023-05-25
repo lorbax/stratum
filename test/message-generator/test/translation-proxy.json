@@ -17,12 +17,13 @@
         {
             "message": {
                 "type": "OpenExtendedMiningChannelSuccess",
-                "request_id": 0,
+                "request_id": 666,
                 "channel_id": 1,
                 "target": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255],
                 "extranonce_size": 16,
                 "extranonce_prefix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
             },
+            "tbd": [["request_id","variable_name"]],
             "id": "open_extended_mining_channel_success"
         },
         {
@@ -92,14 +93,14 @@
             "role": "server",
             "results": [
                 {
-                    "type": "match_message_field",
+                    "type": "get_message_field",
                     "value": [
                         "MiningProtocol",
                         "OpenExtendedMiningChannel",
                         [
                             [
                                 "request_id",
-                                {"U32": 4}
+                                "variable_name"
                             ]
                         ]
                     ]

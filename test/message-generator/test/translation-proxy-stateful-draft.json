@@ -20,7 +20,7 @@
                 "extranonce_size": 666,
                 "extranonce_prefix": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
             },
-            "tbd": [["request_id","nome_della_variabile"]],
+            "tbd": [["request_id","variable_name"]],
             "id": "open_extended_mining_channel_success"
         },
         {
@@ -82,7 +82,7 @@
                         [
                             [
                                 "request_id",
-                                "nome_della_variabile"
+                                "variable_name"
                             ]
                         ]
                     ]
