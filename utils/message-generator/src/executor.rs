@@ -8,7 +8,7 @@ use crate::{
 use async_channel::{Receiver, Sender};
 use binary_sv2::Serialize;
 use codec_sv2::{Frame, StandardEitherFrame as EitherFrame, Sv2Frame};
-use roles_logic_sv2::parsers::{self, AnyMessage};
+use roles_logic_sv2::{parsers::{self, AnyMessage}, mining_sv2::OpenExtendedMiningChannelSuccess};
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use tokio::{
@@ -161,12 +161,19 @@ impl Executor {
                 let replace_fields = message_.2.clone();
                 let message = message_.1.clone();
                 let frame = message_.0;
-                let arbitrary_fields: Vec<ReplaceField> = replace_fields.clone().into_iter().filter(|s| s.keyword == "ARBITRARY").collect();
-                let replace_fields: Vec<ReplaceField> = replace_fields.clone().into_iter().filter(|s| s.keyword != "ARBITRARY").collect();    
-                
+                let arbitrary_fields: Vec<ReplaceField> = replace_fields
+                    .clone()
+                    .into_iter()
+                    .filter(|s| s.keyword == "ARBITRARY")
+                    .collect();
+                let replace_fields: Vec<ReplaceField> = replace_fields
+                    .clone()
+                    .into_iter()
+                    .filter(|s| s.keyword != "ARBITRARY")
+                    .collect();
+
                 let message = if arbitrary_fields.len() > 0 {
                     let message = change_fields_with_arbitrary_value(message, arbitrary_fields);
-                    println!("QUI FACCIO QUALCOSA");
                     message
                 } else {
                     message
@@ -183,18 +190,15 @@ impl Executor {
                     Err(_) => panic!(),
                 };
 
-
-
-
-                    //let message_modified =
-                    //    change_fields(message, replace_fields, self.save.clone());
-                    //let modified_frame =
-                    //    EitherFrame::Sv2(message_modified.clone().try_into().unwrap());
-                    //println!("SEND {:#?}", message_modified);
-                    //match sender.send(modified_frame).await {
-                    //    Ok(_) => (),
-                    //    Err(_) => panic!(),
-                    //};
+                //let message_modified =
+                //    change_fields(message, replace_fields, self.save.clone());
+                //let modified_frame =
+                //    EitherFrame::Sv2(message_modified.clone().try_into().unwrap());
+                //println!("SEND {:#?}", message_modified);
+                //match sender.send(modified_frame).await {
+                //    Ok(_) => (),
+                //    Err(_) => panic!(),
+                //};
             }
             let mut rs = 0;
             for result in &action.result {
@@ -811,7 +815,7 @@ fn change_fields<'a>(
     let keyword = next.keyword;
     let field_name = next.field_name;
     let value = values
-        .get(&keyword)
+        .get(dbg!(&keyword))
         .expect("value not found for the keyword");
 
     match m.clone() {
@@ -889,41 +893,51 @@ fn change_value_of_serde_field<T: Serialize>(
     serde_json::to_string(&message_as_serde_value).unwrap()
 }
 
-
 fn change_fields_with_arbitrary_value<'a>(
     m: AnyMessage<'a>,
-    mut arbitrary_fields: Vec<ReplaceField>,
+    arbitrary_fields: Vec<ReplaceField>,
 ) -> AnyMessage<'a> {
-    let m_ = m.clone();
-    let next = arbitrary_fields
-        .pop()
-        .expect("replace_fields cannot be empty");
-    let field_name = next.field_name;
-    let m = if let parsers::PoolMessages::Mining(message) = m.clone() {
-        println!("BBBB");
-        let mut message_as_serde_value = serde_json::to_value(&message)
-            .unwrap()
-            .as_object()
-            .unwrap()
-            .values()
-            .next()
-            .unwrap()
-            .clone();
-        let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
-        let message: AnyMessage<'_> = serde_json::from_str(&message_as_string).unwrap();
-        into_static(message)
-    } else {
-        todo!()
-    };
-    //let m: AnyMessage<'_> = match m.clone() {
-    //    parsers::PoolMessages::Common(${0:_}) => todo!(),
-    //    parsers::PoolMessages::Mining(_) => todo!(),
-    //    parsers::PoolMessages::JobDeclaration(_) => todo!(),
-    //    parsers::PoolMessages::TemplateDistribution(_) => todo!(),
-    //};
+    // in the "save" value we store the arbitrary values to be replaced
+    // it will be used by the "change_fields" function called at the end
+    //
+    // TODO
+    // 1. modify the arbitrary_fields in such a way that every field does not have "ARBITRARY" as
+    //    field id, but an id that is unique in this context.
+    // 2. store in the following save hashmap the field values of the message that have to be
+    //    arbitrarly chosen. The keyword of the hashmap must correspond to the keyword of the
+    //    fields in the modified "arbitrary_fields"
+    // 3. call change_fields(m, arbitrary_fields, save)
+    let mut replace_fields: Vec<ReplaceField> = Vec::new();
+    let mut save: HashMap<String, serde_json::Value> = HashMap::new();
 
-    println!("AAAAA");
-    m
+    for field_to_be_replaced in arbitrary_fields.iter() {
+        // here we proceed with 1.
+        let replace_field = ReplaceField {
+            field_name: field_to_be_replaced.clone().field_name,
+            keyword: field_to_be_replaced.clone().field_name,
+        };
+        replace_fields.push(replace_field);
+        let value = get_arbitrary_message_value_from_string_id(m.clone(), field_to_be_replaced.field_name.clone());
+        save.insert(field_to_be_replaced.clone().field_name, value);
+        // now we must
+        // 2.1. retrieve the field value,
+        //      COME FACCIO? faccio un sacco di match o c'e' un modo semplice per farlo?
+        //
+        // 2.2. apply aribitrary on it,
+        //      dovrebbe essere facile
+        //
+        // 2.3. serialize the message in a serde_json::value::Value,
+        //      dovrebbe essere facile, l'ho gia' fatto in "GetMessageField"
+        //
+        // 2.4. retrieve the field value of serialized message and save it into save with
+        //      this key: replace_field.keyword
+        //      facile
+    }
+
+    // everything is already boilerplated to proceed with 3.
+    dbg!(&arbitrary_fields);
+    dbg!(&save);
+    change_fields(m, replace_fields, save)
 }
 fn save_message_field(
     mess: serde_json::Value,
@@ -974,4 +988,79 @@ fn message_to_value<'a>(m: &'a serde_json::Value, field: &str) -> &'a serde_json
     let msg = m.as_object().unwrap();
     let value = msg.get(field).unwrap();
     value
+}
+
+// to be unified with GetMessageField logic
+fn get_arbitrary_message_value_from_string_id(message: AnyMessage<'_>, field_id: String) -> serde_json::Value {
+    let value_new_serde = match message {
+        roles_logic_sv2::parsers::PoolMessages::Common(m) => {
+            let message_to_serde = serde_json::to_value(&m).unwrap(); 
+            let msg = message_to_serde.as_object().unwrap();
+            let value_old_serde = msg.get(&field_id).unwrap();
+            let value_old: Sv2Type = serde_json::from_value(value_old_serde.clone()).unwrap();
+            let value_new = value_old.arbitrary();
+            let value_new_serde = serde_json::to_value(&value_new).unwrap();
+            value_new_serde 
+        },
+        roles_logic_sv2::parsers::PoolMessages::Mining(m) => {
+            let value_new_serde = match m {
+                roles_logic_sv2::parsers::Mining::CloseChannel(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::NewExtendedMiningJob(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::NewMiningJob(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannel(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::OpenExtendedMiningChannelSuccess(message) => {
+                    let field_id = field_id.as_str();
+                    let value_new_serde = if field_id == "channel_id" {
+                        let value_new = Sv2Type::U32(message.channel_id).arbitrary();
+                        let value_new_serde = if let Sv2Type::U32(inner) = value_new {
+                            serde_json::to_value(inner).unwrap()
+                         } else {
+                             todo!()
+                         };
+                         value_new_serde
+                    } else {
+                        panic!("unknown message field");
+                    };
+                    value_new_serde 
+                },
+                roles_logic_sv2::parsers::Mining::OpenMiningChannelError(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::OpenStandardMiningChannel(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::OpenStandardMiningChannelSuccess(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::Reconnect(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetCustomMiningJob(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetCustomMiningJobError(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetCustomMiningJobSuccess(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetExtranoncePrefix(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetGroupChannel(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetNewPrevHash(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SetTarget(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SubmitSharesError(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SubmitSharesExtended(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SubmitSharesStandard(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::SubmitSharesSuccess(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::UpdateChannel(_) => todo!(),
+                roles_logic_sv2::parsers::Mining::UpdateChannelError(_) => todo!(),
+            };
+            value_new_serde 
+        },
+        roles_logic_sv2::parsers::PoolMessages::JobDeclaration(m) => { 
+            let message_to_serde = serde_json::to_value(&m).unwrap(); 
+            let msg = message_to_serde.as_object().unwrap();
+            let value_old_serde = msg.get(&field_id).unwrap();
+            let value_old: Sv2Type = serde_json::from_value(value_old_serde.clone()).unwrap();
+            let value_new = value_old.arbitrary();
+            let value_new_serde = serde_json::to_value(&value_new).unwrap();
+            value_new_serde 
+        },
+        roles_logic_sv2::parsers::PoolMessages::TemplateDistribution(m) => {
+            let message_to_serde = serde_json::to_value(&m).unwrap(); 
+            let msg = message_to_serde.as_object().unwrap();
+            let value_old_serde = msg.get(&field_id).unwrap();
+            let value_old: Sv2Type = serde_json::from_value(value_old_serde.clone()).unwrap();
+            let value_new = value_old.arbitrary();
+            let value_new_serde = serde_json::to_value(&value_new).unwrap();
+            value_new_serde 
+        },
+    };
+    value_new_serde
 }
