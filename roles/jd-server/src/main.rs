@@ -15,6 +15,7 @@ use tracing::{error, info, warn};
 mod error;
 mod lib;
 mod status;
+mod mempool;
 
 use lib::template_receiver::TemplateRx;
 

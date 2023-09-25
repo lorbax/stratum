@@ -1,5 +1,6 @@
 #[cfg(feature = "prop_test")]
 use quickcheck::{Arbitrary, Gen};
+use std::hash::{Hash, Hasher};
 
 mod inner;
 mod seq_inner;
@@ -80,3 +81,14 @@ impl<'a> From<&'a U32AsRef<'a>> for u32 {
         u32::from_le_bytes([b[0], b[1], b[2], b[3]])
     }
 }
+ impl<'a> Hash for ShortTxId<'a> {
+     fn hash<H: Hasher>(&self, state: &mut H) {
+         match self {
+            Inner::Ref(array_ref) => {
+                array_ref.hash(state)
+            },
+            Inner::Owned(vector_owned) => {
+            vector_owned.hash(state)},
+        }
+     }
+ }
