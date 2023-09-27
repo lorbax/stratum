@@ -1,7 +1,6 @@
-use crate::lib::bitcoincore_rpc_client;  
+use crate::lib::jsonrpc_core::client::Client;
 
-///// Client implements a JSON-RPC client for the Bitcoin Core daemon or compatible APIs.
-//  pub struct Client {
-//      client: jsonrpc::client::Client,
-//  }
-
+/// Client implements a JSON-RPC client for the Bitcoin Core daemon or compatible APIs.
+pub struct RpcClient {
+    client: Client,
+}
