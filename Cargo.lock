@@ -1154,6 +1154,7 @@ dependencies = [
  "rand 0.8.5",
  "roles_logic_sv2",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "tracing",
