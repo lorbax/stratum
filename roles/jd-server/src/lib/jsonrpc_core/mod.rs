@@ -4,6 +4,7 @@ use std::fmt;
 
 pub mod client;
 pub mod error;
+pub mod http;
 
 /// A JSONRPC request object.                                                                      
 pub struct Request<'a> {

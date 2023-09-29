@@ -48,7 +48,7 @@ use crate::{lib::job_declarator::JobDeclarator, status::Status};
 /// public key from the pool-config.toml
 #[derive(Debug, Clone)]
 pub struct PublicKeyWrapper {
-    pub pub_key: PublicKey,
+    pub pub_key: bitcoin::PublicKey,
 }
 
 /// used by serde for deserialization
@@ -64,7 +64,7 @@ impl<'de> Visitor<'de> for PublicKeyVisitor {
     where
         E: serde::de::Error,
     {
-        match PublicKey::from_str(v) {
+        match bitcoin::PublicKey::from_str(v) {
             Ok(pub_key) => Ok(pub_key),
             Err(e) => Err(E::custom(format!(
                 "Invalid coinbase output config public key: {:?}",
