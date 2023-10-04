@@ -14,6 +14,7 @@ use std::str::FromStr;
 use tracing::{error, info, warn};
 mod error;
 mod lib;
+mod mempool;
 mod status;
 
 use lib::template_receiver::TemplateRx;
