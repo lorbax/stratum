@@ -1,8 +1,6 @@
-use crate::lib::mempool::{hex_iterator::HexIterator, Amount, BlockHash};
+use crate::lib::mempool::{hex_iterator::HexIterator, BlockHash};
 use bitcoin::{blockdata::transaction::Transaction, consensus::Decodable};
-use hashbrown::hash_map::HashMap;
 use jsonrpc::{error::Error as JsonRpcError, Client as JosnRpcClient};
-use serde::Deserialize;
 use stratum_common::bitcoin;
 
 #[derive(Clone, Debug)]
@@ -66,13 +64,8 @@ pub trait RpcApi: Sized {
         args: &[serde_json::Value],
     ) -> Result<T, BitcoincoreRpcError>;
 
-    fn get_raw_mempool_verbose(
-        &self,
-    ) -> Result<HashMap<String, GetMempoolEntryResult>, BitcoincoreRpcError> {
-        self.call("getrawmempool", &[serde_json::to_value(true).unwrap()])
-    }
-    
     /// Get txids of all transactions in a memory pool
+    /// if verbose is needed, deserialize it with hashbrown
     fn get_raw_mempool(&self) -> RResult<Vec<String>> {
         self.call("getrawmempool", &[])
     }
@@ -211,64 +204,4 @@ fn handle_defaults<'a>(
     } else {
         &args[..required_num]
     }
-}
-
-#[derive(Deserialize)]
-pub struct GetMempoolEntryResultFees {
-    /// Transaction fee in BTC
-    //#[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub base: Amount,
-    /// Transaction fee with fee deltas used for mining priority in BTC
-    //#[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub modified: Amount,
-    /// Modified fees (see above) of in-mempool ancestors (including this one) in BTC
-    //#[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub ancestor: Amount,
-    /// Modified fees (see above) of in-mempool descendants (including this one) in BTC
-    //#[serde(with = "bitcoin::amount::serde::as_btc")]
-    pub descendant: Amount,
-}
-
-#[derive(Deserialize)]
-pub struct GetMempoolEntryResult {
-    /// Virtual transaction size as defined in BIP 141. This is different from actual serialized
-    /// size for witness transactions as witness data is discounted.
-    #[serde(alias = "size")]
-    pub vsize: u64,
-    /// Transaction weight as defined in BIP 141. Added in Core v0.19.0.
-    pub weight: Option<u64>,
-    /// Local time transaction entered pool in seconds since 1 Jan 1970 GMT
-    pub time: u64,
-    /// Block height when transaction entered pool
-    pub height: u64,
-    /// Number of in-mempool descendant transactions (including this one)
-    #[serde(rename = "descendantcount")]
-    pub descendant_count: u64,
-    /// Virtual transaction size of in-mempool descendants (including this one)
-    #[serde(rename = "descendantsize")]
-    pub descendant_size: u64,
-    /// Number of in-mempool ancestor transactions (including this one)
-    #[serde(rename = "ancestorcount")]
-    pub ancestor_count: u64,
-    /// Virtual transaction size of in-mempool ancestors (including this one)
-    #[serde(rename = "ancestorsize")]
-    pub ancestor_size: u64,
-    /// Hash of serialized transaction, including witness data
-    /// before was pub wtxid: bitcoin::Txid,
-    pub wtxid: String,
-    //Fee information
-    pub fees: GetMempoolEntryResultFees,
-    /// Unconfirmed transactions used as inputs for this transaction
-    /// before was pub depends: Vec<bitcoin::Txid>,
-    pub depends: Vec<String>,
-    /// Unconfirmed transactions spending outputs from this transaction
-    /// before was pub spent_by: Vec<bitcoin::Txid>,
-    #[serde(rename = "spentby")]
-    pub spent_by: Vec<String>,
-    /// Whether this transaction could be replaced due to BIP125 (replace-by-fee)
-    #[serde(rename = "bip125-replaceable")]
-    pub bip125_replaceable: bool,
-    /// Whether this transaction is currently unbroadcast (initial broadcast not yet acknowledged by any peers)
-    /// Added in Bitcoin Core v0.21
-    pub unbroadcast: Option<bool>,
 }
