@@ -1,5 +1,5 @@
 use std::{convert::TryInto, io::Cursor};
-use stratum_common::bitcoin::{hashes::Hash, psbt::serialize::Deserialize, Block, Transaction};
+use stratum_common::bitcoin::{hashes::Hash, Block, Transaction, psbt::serialize::Deserialize};
 
 use binary_sv2::ShortTxId;
 use roles_logic_sv2::{

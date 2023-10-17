@@ -71,6 +71,11 @@ pub trait RpcApi: Sized {
     ) -> Result<HashMap<String, GetMempoolEntryResult>, BitcoincoreRpcError> {
         self.call("getrawmempool", &[serde_json::to_value(true).unwrap()])
     }
+    
+    /// Get txids of all transactions in a memory pool
+    fn get_raw_mempool(&self) -> RResult<Vec<String>> {
+        self.call("getrawmempool", &[])
+    }
 
     fn get_raw_transaction(
         &self,
