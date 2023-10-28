@@ -1,0 +1,41 @@
+{
+    "version": "2",
+    "doc": [
+        "This test does"
+    ],
+    "frame_builders": [
+    ],
+    "actions": [
+    ],
+    "setup_commands": [
+       {
+           "command": "cargo",
+           "args": [
+                       "run",
+                       "-p",
+                       "jd_client",
+                       "--",
+                       "-c",
+                       "./test/config/jd-client-provide-missing-transactions.toml"
+           ],
+           "conditions": {
+               "WithConditions": {
+                   "conditions": [
+                       {
+                           "output_string": "Failed to connect",
+                           "output_location": "StdOut",
+                           "condition": true
+                       }
+                   ],
+                   "timer_secs": 240,
+                   "warn_no_panic": false
+               }
+           }
+       }
+    ],
+    "execution_commands": [
+    ],
+    "cleanup_commands": [
+    ],
+    "role": "none"
+}
