@@ -367,7 +367,7 @@ mod test {
         let timer = std::time::Instant::now();
         let mut elapsed = std::time::Duration::from_secs(0);
         let mut count = 0;
-        while dbg!(elapsed) <= dbg!(total_run_time) {
+        while elapsed <= total_run_time {
             // start hashing util a target is met and submit to
             mock_mine(target.clone().into(),&mut share);
             elapsed = timer.elapsed();
@@ -393,12 +393,10 @@ mod test {
 
 
     fn mock_mine(target: Target, share: &mut [u8;80]) {
-        dbg!(&target);
         let mut hashed: Target = [255_u8; 32].into();
         while hashed > target {
             hashed = hash(share);
         };
-        println!("{:#?}", hashed);
     }
 
     // returns hashrate based on how fast the device hashes over the given duration
