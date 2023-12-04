@@ -395,7 +395,7 @@ mod test {
     fn mock_mine(target: Target, share: &mut [u8;80]) {
         dbg!(&target);
         let mut hashed: Target = [255_u8; 32].into();
-        while hashed < target {
+        while hashed > target {
             hashed = hash(share);
         };
         println!("{:#?}", hashed);
@@ -420,12 +420,10 @@ mod test {
     }
 
     fn hash(share: &mut [u8;80]) -> Target {
-        for b in share.as_mut() {
-            if b < &mut 255 {
-                *b += 1;
-                break;
-            }
-        }
+        let nonce: [u8;8] = share[0..8].try_into().unwrap();
+        let mut nonce = u64::from_le_bytes(nonce);
+        nonce += 1;
+        share[0..8].copy_from_slice(&nonce.to_le_bytes());
         let hash = Sha256::digest(&share)
             .to_vec();
         let hash: U256<'static> = hash.try_into().unwrap();
