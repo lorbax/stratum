@@ -354,6 +354,7 @@ mod test {
         let total_run_time = std::time::Duration::from_secs(11);
         let warm_up_time = std::time::Duration::from_secs(1);
         let initial_nominal_hashrate = measure_hashrate(5);
+        dbg!(&initial_nominal_hashrate);
         let target = match roles_logic_sv2::utils::hash_rate_to_target(
             initial_nominal_hashrate,
             expected_shares_per_minute.into(),
@@ -361,6 +362,7 @@ mod test {
             Ok(target) => target,
             Err(_) => panic!(),
         };
+        dbg!(&target);
 
 
         let mut share = generate_random_80_byte_array();
@@ -376,11 +378,12 @@ mod test {
             }
         }
 
-        let calculated_share_per_min = count as f32 / ((elapsed.as_secs_f32() - warm_up_time.as_secs_f32()) / 60.0);
+        let calculated_share_per_min = count as f32 / ((elapsed.as_secs_f32()) / 60.0);
         // This is the error margin for a confidence of 99% given the expect number of shares per
         // minute
         let error_margin = get_error(expected_shares_per_minute.into());
         let error = (calculated_share_per_min - expected_shares_per_minute).abs();
+        panic!();
         assert!(
             error <= error_margin as f32,
             "Calculated shares per minute are outside the 99% confidence interval. Error: {:?}, Error margin: {:?}", error, error_margin

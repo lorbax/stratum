@@ -329,7 +329,7 @@ pub fn hash_rate_to_target(
     let numerator =
         two_to_256_minus_one - bitcoin::util::uint::Uint256::from_be_bytes(h_times_s_array);
 
-    let mut target = numerator.div(denominator).to_be_bytes();
+    let mut target = dbg!(numerator.div(denominator)).to_be_bytes();
     target.reverse();
     Ok(U256::<'static>::from(target))
 }
@@ -986,6 +986,19 @@ mod tests {
         assert!(delta.abs() < 100);
     }
 
+    #[test]
+    fn test_hash_rate_to_target_prova() {
+        let hashrate: f64 = 617311.0;
+        let share_per_min: f64 = 1000.0;
+        let target: f64 = 3.126165014e72;
+        //let target: f64 = 1.875749647e68;
+        let target_calculated = hash_rate_to_target(hashrate, share_per_min);
+        dbg!(target);
+        dbg!(target_calculated);
+        panic!()
+
+        
+    }
     #[test]
     fn test_hash_rate_from_target() {
         let hr = 202470.828;
