@@ -122,8 +122,8 @@ impl Responder {
 
     /// #### 4.5.1.2 Responder
     ///
-    /// 1. receives ephemeral public key message with ElligatorSwift encoding (64 bytes plaintext) 
-    /// 2. obtain the 32 bytes encoding of x-coordinates of remote ephemeral PubKey parses public 
+    /// 1. receives ephemeral public key message with ElligatorSwift encoding (64 bytes plaintext)
+    /// 2. obtain the 32 bytes encoding of x-coordinates of remote ephemeral PubKey parses public
     ///    key as `re.public_key`
     /// 3. calls `MixHash(re.public_key)`
     /// 4. calls `DecryptAndHash()` on remaining bytes (i.e. on empty data with empty _k_, thus effectively only calls `MixHash()` on empty data)
@@ -131,7 +131,7 @@ impl Responder {
     /// #### 4.5.2.1 Responder
     ///
     /// 1. initializes empty output buffer
-    /// 2. generates ephemeral keypair `e`, appends the 64 bytes ElligatorSwift encoding of 
+    /// 2. generates ephemeral keypair `e`, appends the 64 bytes ElligatorSwift encoding of
     ///    `e.public_key` to the buffer
     /// 3. calls `MixHash(e.public_key)`
     /// 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
