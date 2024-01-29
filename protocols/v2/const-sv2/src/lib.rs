@@ -16,8 +16,8 @@ pub const NOISE_FRAME_HEADER_SIZE: usize = 2;
 pub const NOISE_FRAME_HEADER_LEN_OFFSET: usize = 0;
 pub const NOISE_FRAME_MAX_SIZE: usize = u16::MAX as usize;
 
-pub const INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH: usize = 170;
-pub const RESPONDER_EXPECTED_HANDSHAKE_MESSAGE_LENGTH: usize = 32;
+pub const INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH: usize = 202;
+pub const RESPONDER_EXPECTED_HANDSHAKE_MESSAGE_LENGTH: usize = 64;
 
 /// If protocolName is less than or equal to 32 bytes in length, use protocolName with zero bytes
 /// appended to make 32 bytes. Otherwise, apply HASH to it. For name =
