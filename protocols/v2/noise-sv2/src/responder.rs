@@ -9,7 +9,7 @@ use crate::{
 };
 use aes_gcm::KeyInit;
 use chacha20poly1305::ChaCha20Poly1305;
-use secp256k1::{Keypair, Secp256k1, PublicKey, SecretKey, ellswift::ElligatorSwift};
+use secp256k1::{ellswift::ElligatorSwift, Keypair, PublicKey, Secp256k1, SecretKey};
 
 const VERSION: u16 = 0;
 
@@ -156,7 +156,10 @@ impl Responder {
     /// Message length: 170 bytes
     pub fn step_1(&mut self, re_pub: [u8; 64]) -> Result<([u8; 202], NoiseCodec), aes_gcm::Error> {
         //let re_pub = ElligatorSwift::from_array(re_pub);
-        let re_pub: [u8; 32] = PublicKey::from_ellswift(ElligatorSwift::from_array(re_pub)).x_only_public_key().0.serialize();
+        let re_pub: [u8; 32] = PublicKey::from_ellswift(ElligatorSwift::from_array(re_pub))
+            .x_only_public_key()
+            .0
+            .serialize();
         // 4.5.1.2 Responder
         Self::mix_hash(self, &re_pub[..]);
         Self::decrypt_and_hash(self, &mut vec![])?;
@@ -164,7 +167,8 @@ impl Responder {
         // 4.5.2.1 Responder
         let mut out = [0; 202];
         let keypair = self.e;
-        let elliswift_pubkey_serialized = ElligatorSwift::from_pubkey(keypair.public_key()).to_array();
+        let elliswift_pubkey_serialized =
+            ElligatorSwift::from_pubkey(keypair.public_key()).to_array();
         out[..64].copy_from_slice(&elliswift_pubkey_serialized[..64]);
 
         // 3. calls `MixHash(e.public_key)`
@@ -190,7 +194,7 @@ impl Responder {
         encrypted_static_pub_k[..32].copy_from_slice(&static_pub_k[..32]);
         self.encrypt_and_hash(&mut encrypted_static_pub_k)?;
         out[64..(64 + 16 + 32)].copy_from_slice(&encrypted_static_pub_k[..(32 + 16)]);
-        // 64+16+32 = 112 
+        // 64+16+32 = 112
 
         // 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
         let s_private_key = self.s.secret_bytes();
