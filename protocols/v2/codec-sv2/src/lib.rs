@@ -58,7 +58,7 @@ impl State {
 
     pub fn step_1(
         &mut self,
-        re_pub: [u8; 32],
+        re_pub: [u8; 64],
     ) -> core::result::Result<(HandShakeFrame, Self), Error> {
         match self {
             Self::HandShake(h) => match h {
@@ -72,7 +72,8 @@ impl State {
         }
     }
 
-    pub fn step_2(&mut self, message: [u8; 170]) -> core::result::Result<Self, Error> {
+    // TODO the length of the message should be 170 +32 bytes due to the ellswift encoding
+    pub fn step_2(&mut self, message: [u8; 202]) -> core::result::Result<Self, Error> {
         match self {
             Self::HandShake(h) => match h {
                 HandshakeRole::Initiator(i) => {

@@ -9,7 +9,7 @@ use crate::{
 };
 use aes_gcm::KeyInit;
 use chacha20poly1305::ChaCha20Poly1305;
-use secp256k1::{Keypair, Secp256k1, SecretKey};
+use secp256k1::{Keypair, Secp256k1, PublicKey, SecretKey, ellswift::ElligatorSwift};
 
 const VERSION: u16 = 0;
 
@@ -135,7 +135,7 @@ impl Responder {
     /// 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
     /// 5. appends `EncryptAndHash(s.public_key)` (32 bytes encrypted public key, 16 bytes MAC)
     /// 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
-    /// 7. appends `EncryptAndHash(SIGNATURE_NOISE_MESSAGE)` to the buffer
+    /// 7. appends `EncryptAndHash(SIGNATURE_NOISE_MESSAGE)` (74 bytes) to the buffer
     /// 8. submits the buffer for sending to the initiator
     /// 9. return pair of CipherState objects, the first for encrypting transport messages from initiator to responder, and the second for messages in the other direction:
     ///    1. sets `temp_k1, temp_k2 = HKDF(ck, zerolen, 2)`
@@ -154,30 +154,43 @@ impl Responder {
     /// | MAC                     | Message authentication code for SIGNATURE_NOISE_MESSAGE                                                                                                        |
     ///
     /// Message length: 170 bytes
-    pub fn step_1(&mut self, re_pub: [u8; 32]) -> Result<([u8; 170], NoiseCodec), aes_gcm::Error> {
+    pub fn step_1(&mut self, re_pub: [u8; 64]) -> Result<([u8; 202], NoiseCodec), aes_gcm::Error> {
+        //let re_pub = ElligatorSwift::from_array(re_pub);
+        let re_pub: [u8; 32] = PublicKey::from_ellswift(ElligatorSwift::from_array(re_pub)).x_only_public_key().0.serialize();
         // 4.5.1.2 Responder
         Self::mix_hash(self, &re_pub[..]);
         Self::decrypt_and_hash(self, &mut vec![])?;
 
         // 4.5.2.1 Responder
-        let mut out = [0; 170];
-        let serialized = self.e.x_only_public_key().0.serialize();
-        out[..32].copy_from_slice(&serialized[..32]);
+        let mut out = [0; 202];
+        let keypair = self.e;
+        let elliswift_pubkey_serialized = ElligatorSwift::from_pubkey(keypair.public_key()).to_array();
+        out[..64].copy_from_slice(&elliswift_pubkey_serialized[..64]);
 
         // 3. calls `MixHash(e.public_key)`
+        // what is here is not the public key encoded with ElligatorSwift, but the x-coordinate of
+        // the public key (which is a point in the EC).
+        //
+        //Self::mix_hash(self, &serialized);
+        let serialized = keypair.x_only_public_key().0.serialize();
         Self::mix_hash(self, &serialized);
 
         // 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
-        let e_private_key = self.e.secret_bytes();
+        let e_private_key = keypair.secret_bytes();
         let ecdh = Self::ecdh(&e_private_key[..], &re_pub[..]);
+        // TODO write a function ecdh_elleswift
+        //let e_private_key = keypair.secret_key();
+        //let shared_secret: [u8; 32] = ElligatorSwift::shared_secret(re_pub, elliswift_pubkey, e_private_key, ElligatorSwiftParty::B, None).try_into();
         Self::mix_key(self, &ecdh);
+        //Self::mix_key(self, &shared_secret);
 
         // 5. appends `EncryptAndHash(s.public_key)` (32 bytes encrypted public key, 16 bytes MAC)
         let mut encrypted_static_pub_k = vec![0; 32];
         let static_pub_k = self.s.x_only_public_key().0.serialize();
         encrypted_static_pub_k[..32].copy_from_slice(&static_pub_k[..32]);
         self.encrypt_and_hash(&mut encrypted_static_pub_k)?;
-        out[32..(32 + 16 + 32)].copy_from_slice(&encrypted_static_pub_k[..(32 + 16)]);
+        out[64..(64 + 16 + 32)].copy_from_slice(&encrypted_static_pub_k[..(32 + 16)]);
+        // 64+16+32 = 112 
 
         // 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
         let s_private_key = self.s.secret_bytes();
@@ -195,9 +208,10 @@ impl Responder {
         let mut signature_part = Vec::with_capacity(74 + 16);
         signature_part.extend_from_slice(&signature_noise_message[..]);
         Self::encrypt_and_hash(self, &mut signature_part)?;
-        for i in (32 + 48)..(32 + 48 + 74 + 16) {
-            out[i] = signature_part[i - (32 + 48)];
-        }
+        //for i in 112..(112 + 74 + 16) {
+        //    out[i] = signature_part[i - 112];
+        //}
+        out[112..(112 + 74 + 16)].copy_from_slice(&signature_part[..(74 + 16)]);
 
         // 9. return pair of CipherState objects, the first for encrypting transport messages from initiator to responder, and the second for messages in the other direction:
         let ck = Self::get_ck(self);

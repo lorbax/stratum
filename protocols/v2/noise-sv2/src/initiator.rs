@@ -9,7 +9,7 @@ use crate::{
 };
 use aes_gcm::KeyInit;
 use chacha20poly1305::ChaCha20Poly1305;
-use secp256k1::{Keypair, XOnlyPublicKey};
+use secp256k1::{Keypair, XOnlyPublicKey, ellswift::ElligatorSwift, PublicKey};
 
 pub struct Initiator {
     handshake_cipher: Option<ChaCha20Poly1305>,
@@ -124,13 +124,14 @@ impl Initiator {
     /// | PUBKEY     | Initiator's ephemeral public key |
     ///
     /// Message length: 32 bytes
-    pub fn step_0(&mut self) -> Result<[u8; 32], aes_gcm::Error> {
+    pub fn step_0(&mut self) -> Result<[u8; 64], aes_gcm::Error> {
+        let elliswift_enc_pubkey = ElligatorSwift::from_pubkey(self.e.public_key()).to_array();
         let serialized = self.e.public_key().x_only_public_key().0.serialize();
         self.mix_hash(&serialized);
         self.encrypt_and_hash(&mut vec![])?;
 
-        let mut message = [0u8; 32];
-        message[..32].copy_from_slice(&serialized[..32]);
+        let mut message = [0u8; 64];
+        message[..64].copy_from_slice(&elliswift_enc_pubkey[..64]);
         Ok(message)
     }
 
@@ -151,10 +152,14 @@ impl Initiator {
     ///
     ///
     ///
-    pub fn step_2(&mut self, message: [u8; 170]) -> Result<NoiseCodec, Error> {
+    pub fn step_2(&mut self, message: [u8; 202]) -> Result<NoiseCodec, Error> {
+
+        let mut  elliswift_serialized: [u8; 64] = [0; 64];    
+        elliswift_serialized.clone_from_slice(&message[0..64]);
+        let remote_pub_key = &PublicKey::from_ellswift(ElligatorSwift::from_array(elliswift_serialized)).x_only_public_key().0.serialize();
         // 2. interprets first 32 bytes as `re.public_key`
         // 3. calls `MixHash(re.public_key)`
-        let remote_pub_key = &message[0..32];
+        //let remote_pub_key = &message[0..32];
         self.mix_hash(remote_pub_key);
 
         // 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
@@ -162,7 +167,9 @@ impl Initiator {
         self.mix_key(&Self::ecdh(&e_private_key[..], remote_pub_key)[..]);
 
         // 5. decrypts next 48 bytes with `DecryptAndHash()` and stores the results as `rs.public_key` which is **server's static public key** (note that 32 bytes is the public key and 16 bytes is MAC)
-        let mut to_decrypt = message[32..80].to_vec();
+        // added additional 32 bytes because of the switch to elligatorswift encoding, wich is 64
+        // bytes instead of 32
+        let mut to_decrypt = message[64..80+32].to_vec();
 
         self.decrypt_and_hash(&mut to_decrypt)?;
         let rs_pub_key = to_decrypt;
@@ -170,7 +177,7 @@ impl Initiator {
         // 6. calls `MixKey(ECDH(e.private_key, rs.public_key)`
         self.mix_key(&Self::ecdh(&e_private_key[..], &rs_pub_key[..])[..]);
 
-        let mut to_decrypt = message[80..170].to_vec();
+        let mut to_decrypt = message[80+32..170+32].to_vec();
         self.decrypt_and_hash(&mut to_decrypt)?;
         let plaintext: [u8; 74] = to_decrypt.try_into().unwrap();
         let signature_message: SignatureNoiseMessage = plaintext.into();
