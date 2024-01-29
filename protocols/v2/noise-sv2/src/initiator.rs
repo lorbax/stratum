@@ -9,7 +9,7 @@ use crate::{
 };
 use aes_gcm::KeyInit;
 use chacha20poly1305::ChaCha20Poly1305;
-use secp256k1::{Keypair, XOnlyPublicKey, ellswift::ElligatorSwift, PublicKey};
+use secp256k1::{ellswift::ElligatorSwift, Keypair, PublicKey, XOnlyPublicKey};
 
 pub struct Initiator {
     handshake_cipher: Option<ChaCha20Poly1305>,
@@ -138,10 +138,14 @@ impl Initiator {
     /// #### 4.5.2.2 Initiator
     ///
     /// 1. receives NX-handshake part 2 message
-    /// 2. interprets first 32 bytes as `re.public_key`
+    /// 2. interprets first 64 bytes as ElligatorSwift encoding of public key. From this, it is
+    ///    derived the 32 bytes remote ephemeral pubkey `re.public_key`
     /// 3. calls `MixHash(re.public_key)`
     /// 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
-    /// 5. decrypts next 48 bytes with `DecryptAndHash()` and stores the results as `rs.public_key` which is **server's static public key** (note that 32 bytes is the public key and 16 bytes is MAC)
+    /// 5. decrypts next 48 bytes with `DecryptAndHash()` and stores the results as `rs.public_key`
+    ///    which is **server's static public key**. Note that server static key it is not
+    ///    ElligatorSwift encoded because it is encrypted with ECDH ephemeral procedure, hence it is
+    ///    32 bytes is the public key and 16 bytes MAC)
     /// 6. calls `MixKey(ECDH(e.private_key, rs.public_key)`
     /// 7. decrypts next 90 bytes with `DecryptAndHash()` and deserialize plaintext into `SIGNATURE_NOISE_MESSAGE` (74 bytes data + 16 bytes MAC)
     /// 8. return pair of CipherState objects, the first for encrypting transport messages from initiator to responder, and the second for messages in the other direction:
@@ -153,23 +157,26 @@ impl Initiator {
     ///
     ///
     pub fn step_2(&mut self, message: [u8; 202]) -> Result<NoiseCodec, Error> {
-
-        let mut  elliswift_serialized: [u8; 64] = [0; 64];    
+        // 2. interprets first 64 bytes as ElligatorSwift encoding of x-coordinate of public key
+        // from this is derived the 32-bytes remote ephemeral public key `re.public_key`
+        let mut elliswift_serialized: [u8; 64] = [0; 64];
         elliswift_serialized.clone_from_slice(&message[0..64]);
-        let remote_pub_key = &PublicKey::from_ellswift(ElligatorSwift::from_array(elliswift_serialized)).x_only_public_key().0.serialize();
-        // 2. interprets first 32 bytes as `re.public_key`
+        let remote_pub_key =
+            &PublicKey::from_ellswift(ElligatorSwift::from_array(elliswift_serialized))
+                .x_only_public_key()
+                .0
+                .serialize();
         // 3. calls `MixHash(re.public_key)`
-        //let remote_pub_key = &message[0..32];
         self.mix_hash(remote_pub_key);
 
         // 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
         let e_private_key = self.e.secret_bytes();
         self.mix_key(&Self::ecdh(&e_private_key[..], remote_pub_key)[..]);
 
-        // 5. decrypts next 48 bytes with `DecryptAndHash()` and stores the results as `rs.public_key` which is **server's static public key** (note that 32 bytes is the public key and 16 bytes is MAC)
-        // added additional 32 bytes because of the switch to elligatorswift encoding, wich is 64
-        // bytes instead of 32
-        let mut to_decrypt = message[64..80+32].to_vec();
+        // 5. decrypts next 48 bytes with `DecryptAndHash()` and stores the results as
+        // `rs.public_key` which is **server's static public key** (note that 32 bytes is the
+        // public key and 16 bytes is MAC)
+        let mut to_decrypt = message[64..112].to_vec();
 
         self.decrypt_and_hash(&mut to_decrypt)?;
         let rs_pub_key = to_decrypt;
@@ -177,7 +184,8 @@ impl Initiator {
         // 6. calls `MixKey(ECDH(e.private_key, rs.public_key)`
         self.mix_key(&Self::ecdh(&e_private_key[..], &rs_pub_key[..])[..]);
 
-        let mut to_decrypt = message[80+32..170+32].to_vec();
+        // Decrypt and verify the SignatureNoiseMessage
+        let mut to_decrypt = message[112..202].to_vec();
         self.decrypt_and_hash(&mut to_decrypt)?;
         let plaintext: [u8; 74] = to_decrypt.try_into().unwrap();
         let signature_message: SignatureNoiseMessage = plaintext.into();
