@@ -72,7 +72,6 @@ impl State {
         }
     }
 
-    // TODO the length of the message should be 170 +32 bytes due to the ellswift encoding
     pub fn step_2(&mut self, message: [u8; 202]) -> core::result::Result<Self, Error> {
         match self {
             Self::HandShake(h) => match h {
