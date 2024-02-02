@@ -5,6 +5,7 @@
 use aes_gcm::aead::Buffer;
 pub use aes_gcm::aead::Error as AeadError;
 use cipher_state::GenericCipher;
+use secp256k1::ellswift::ElligatorSwift;
 mod aed_cipher;
 mod cipher_state;
 mod error;
@@ -14,6 +15,24 @@ mod responder;
 mod signature_message;
 #[cfg(test)]
 mod test;
+
+
+trait GetElliSwiftPubkey {
+    fn get_elliswift_pubkey_encoding(&self, key_type: TypePubKey) -> ElligatorSwift; 
+}    
+
+enum TypePubKey {
+    //Static,
+    Ephemeral
+}
+struct PseudoHasher(Vec<u8>);
+
+impl core::hash::Hasher for PseudoHasher {
+    fn finish(&self) -> u64 { panic!("should not call this") }
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.extend_from_slice(bytes);
+    }
+}
 
 pub use const_sv2::{NOISE_HASHED_PROTOCOL_NAME_CHACHA, NOISE_SUPPORTED_CIPHERS_MESSAGE};
 

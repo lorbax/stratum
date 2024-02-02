@@ -9,7 +9,18 @@ use crate::{
 };
 use aes_gcm::KeyInit;
 use chacha20poly1305::ChaCha20Poly1305;
-use secp256k1::{ellswift::ElligatorSwift, Keypair, PublicKey, XOnlyPublicKey};
+use secp256k1::{ellswift::{ElligatorSwift, ElligatorSwiftParty}, Keypair, PublicKey, XOnlyPublicKey};
+use crate::{GetElliSwiftPubkey, TypePubKey};
+
+impl GetElliSwiftPubkey for Initiator {
+    fn get_elliswift_pubkey_encoding(&self, key_type: TypePubKey) -> ElligatorSwift {
+        match key_type {
+            //TypePubKey::Static => todo!(),
+            TypePubKey::Ephemeral => ElligatorSwift::from_pubkey(self.e.public_key()),
+        }
+    }
+}    
+
 
 pub struct Initiator {
     handshake_cipher: Option<ChaCha20Poly1305>,
@@ -126,12 +137,15 @@ impl Initiator {
     /// Message length: 32 bytes
     pub fn step_0(&mut self) -> Result<[u8; 64], aes_gcm::Error> {
         let elliswift_enc_pubkey = ElligatorSwift::from_pubkey(self.e.public_key()).to_array();
-        let serialized = self.e.public_key().x_only_public_key().0.serialize();
-        self.mix_hash(&serialized);
+        //let serialized = self.e.public_key().x_only_public_key().0.serialize();
+        //self.mix_hash(&serialized);
+        self.mix_hash(&elliswift_enc_pubkey);
         self.encrypt_and_hash(&mut vec![])?;
 
         let mut message = [0u8; 64];
         message[..64].copy_from_slice(&elliswift_enc_pubkey[..64]);
+        println!("pubkey step 0");
+        dbg!(&message);
         Ok(message)
     }
 
@@ -156,39 +170,43 @@ impl Initiator {
     ///
     ///
     ///
-    pub fn step_2(&mut self, message: [u8; 202]) -> Result<NoiseCodec, Error> {
+    pub fn step_2(&mut self, message: [u8; 234]) -> Result<NoiseCodec, Error> {
         // 2. interprets first 64 bytes as ElligatorSwift encoding of x-coordinate of public key
         // from this is derived the 32-bytes remote ephemeral public key `re.public_key`
-        let mut elliswift_serialized: [u8; 64] = [0; 64];
-        elliswift_serialized.clone_from_slice(&message[0..64]);
-        let remote_pub_key =
-            &PublicKey::from_ellswift(ElligatorSwift::from_array(elliswift_serialized))
-                .x_only_public_key()
-                .0
-                .serialize();
+        let mut elliswift_theirs_ephemeral_serialized: [u8; 64] = [0; 64];
+        elliswift_theirs_ephemeral_serialized.clone_from_slice(&message[0..64]);
+        self.mix_hash(&elliswift_theirs_ephemeral_serialized);
+        
         // 3. calls `MixHash(re.public_key)`
-        self.mix_hash(remote_pub_key);
-
         // 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
-        let e_private_key = self.e.secret_bytes();
-        self.mix_key(&Self::ecdh(&e_private_key[..], remote_pub_key)[..]);
+        let e_private_key = self.e.secret_key();
+        let elligatorswift_ours_ephemeral = ElligatorSwift::from_pubkey(self.e.public_key()); 
+        let elligatorswift_theirs_ephemeral = ElligatorSwift::from_array(elliswift_theirs_ephemeral_serialized);
+        let ecdh_ephemeral: [u8; 32] = ElligatorSwift::shared_secret(elligatorswift_ours_ephemeral, elligatorswift_theirs_ephemeral, e_private_key, ElligatorSwiftParty::B, None).to_secret_bytes();
+        self.mix_key(&ecdh_ephemeral);
 
-        // 5. decrypts next 48 bytes with `DecryptAndHash()` and stores the results as
-        // `rs.public_key` which is **server's static public key** (note that 32 bytes is the
-        // public key and 16 bytes is MAC)
-        let mut to_decrypt = message[64..112].to_vec();
-
+        // 5. decrypts next 80 bytes with `DecryptAndHash()` and stores the results as
+        // `rs.public_key` which is **server's static public key** (note that 64 bytes is the
+        // elligatorswift encoded public key and 16 bytes is MAC)
+        let mut to_decrypt = message[64..144].to_vec();
+        println!("AAAAAAAAAAAAAAAAAAA");
+        dbg!(&to_decrypt);
         self.decrypt_and_hash(&mut to_decrypt)?;
-        let rs_pub_key = to_decrypt;
+        //let elligatorswift_theirs_static_serialized = to_decrypt;
 
+        println!("AAAAAAAAAAAAAAAAAAA");
         // 6. calls `MixKey(ECDH(e.private_key, rs.public_key)`
-        self.mix_key(&Self::ecdh(&e_private_key[..], &rs_pub_key[..])[..]);
+        let elligatorswift_theirs_static = ElligatorSwift::from_array(elliswift_theirs_ephemeral_serialized);
+        let ecdh_static: [u8; 32] = ElligatorSwift::shared_secret(elligatorswift_ours_ephemeral, elligatorswift_theirs_static, e_private_key, ElligatorSwiftParty::B, None).to_secret_bytes();
+        self.mix_key(&ecdh_static);
 
         // Decrypt and verify the SignatureNoiseMessage
-        let mut to_decrypt = message[112..202].to_vec();
+        let mut to_decrypt = message[144..234].to_vec();
+
         self.decrypt_and_hash(&mut to_decrypt)?;
         let plaintext: [u8; 74] = to_decrypt.try_into().unwrap();
         let signature_message: SignatureNoiseMessage = plaintext.into();
+        let rs_pub_key = PublicKey::from_ellswift(elligatorswift_theirs_static).x_only_public_key().0.serialize();
         let rs_pk_xonly = XOnlyPublicKey::from_slice(&rs_pub_key).unwrap();
         if signature_message.verify(&rs_pk_xonly) {
             let (temp_k1, temp_k2) = Self::hkdf_2(self.get_ck(), &[]);

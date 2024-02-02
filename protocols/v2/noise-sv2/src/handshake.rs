@@ -96,11 +96,14 @@ pub trait HandshakeOp<Cipher: AeadCipher>: CipherState<Cipher> {
     }
 
     fn decrypt_and_hash(&mut self, ciphertext: &mut Vec<u8>) -> Result<(), aes_gcm::Error> {
+        dbg!(&ciphertext);
         let encrypted = ciphertext.clone();
         if self.get_k().is_some() {
             #[allow(clippy::clone_on_copy)]
             let h = self.get_h().clone();
-            self.decrypt_with_ad(&h, ciphertext)?;
+            println!("BBBBBB");
+            dbg!(self.decrypt_with_ad(&h, ciphertext))?;
+            println!("BBBBBB");
         };
         self.mix_hash(&encrypted);
         Ok(())
