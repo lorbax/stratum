@@ -70,7 +70,7 @@ async fn initialize_as_downstream<
     let second_message: HandShakeFrame = second_message
         .try_into()
         .map_err(|_| Error::HandshakeRemoteInvalidMessage)?;
-    let second_message: [u8; 202] = second_message
+    let second_message: [u8; 234] = second_message
         .get_payload_when_handshaking()
         .try_into()
         .map_err(|_| Error::HandshakeRemoteInvalidMessage)?;

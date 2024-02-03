@@ -16,19 +16,20 @@ mod signature_message;
 #[cfg(test)]
 mod test;
 
-
 trait GetElliSwiftPubkey {
-    fn get_elliswift_pubkey_encoding(&self, key_type: TypePubKey) -> ElligatorSwift; 
-}    
+    fn get_elliswift_pubkey_encoding(&self, key_type: TypePubKey) -> ElligatorSwift;
+}
 
 enum TypePubKey {
     //Static,
-    Ephemeral
+    Ephemeral,
 }
 struct PseudoHasher(Vec<u8>);
 
 impl core::hash::Hasher for PseudoHasher {
-    fn finish(&self) -> u64 { panic!("should not call this") }
+    fn finish(&self) -> u64 {
+        panic!("should not call this")
+    }
     fn write(&mut self, bytes: &[u8]) {
         self.0.extend_from_slice(bytes);
     }

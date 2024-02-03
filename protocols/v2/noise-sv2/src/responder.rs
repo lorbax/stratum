@@ -135,7 +135,7 @@ impl Responder {
     ///    `e.public_key` to the buffer
     /// 3. calls `MixHash(e.public_key)`
     /// 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
-    /// 5. appends `EncryptAndHash(s.public_key)` (32 bytes encrypted public key, 16 bytes MAC)
+    /// 5. appends `EncryptAndHash(s.public_key)` (64 bytes encrypted elliswift public key, 16 bytes MAC)
     /// 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
     /// 7. appends `EncryptAndHash(SIGNATURE_NOISE_MESSAGE)` (74 bytes) to the buffer
     /// 8. submits the buffer for sending to the initiator
@@ -155,8 +155,11 @@ impl Responder {
     /// | SIGNATURE_NOISE_MESSAGE | Signed message containing Responder's static key. Signature is issued by authority that is generally known to operate the server acting as the noise responder |
     /// | MAC                     | Message authentication code for SIGNATURE_NOISE_MESSAGE                                                                                                        |
     ///
-    /// Message length: 202 bytes
-    pub fn step_1(&mut self, elligatorswift_theirs_ephemeral_serialized: [u8; 64]) -> Result<([u8; 234], NoiseCodec), aes_gcm::Error> {
+    /// Message length: 232 bytes
+    pub fn step_1(
+        &mut self,
+        elligatorswift_theirs_ephemeral_serialized: [u8; 64],
+    ) -> Result<([u8; 234], NoiseCodec), aes_gcm::Error> {
         // 4.5.1.2 Responder
         Self::mix_hash(self, &elligatorswift_theirs_ephemeral_serialized[..]);
         Self::decrypt_and_hash(self, &mut vec![])?;
@@ -164,20 +167,28 @@ impl Responder {
         // 4.5.2.1 Responder
         let mut out = [0; 234];
         let keypair = self.e;
-        out[..64].copy_from_slice(&elligatorswift_theirs_ephemeral_serialized[..64]);
+        let elligatorswitf_ours_ephemeral = ElligatorSwift::from_pubkey(keypair.public_key());
+        let elligatorswift_ours_ephemeral_serialized = elligatorswitf_ours_ephemeral.to_array();
+        out[..64].copy_from_slice(&elligatorswift_ours_ephemeral_serialized[..64]);
 
         // 3. calls `MixHash(e.public_key)`
         // what is here is not the public key encoded with ElligatorSwift, but the x-coordinate of
         // the public key (which is a point in the EC).
 
-        let elligatorswitf_ours_ephemeral = ElligatorSwift::from_pubkey(keypair.public_key());
-        Self::mix_hash(self, &elligatorswitf_ours_ephemeral.to_array());
+        Self::mix_hash(self, &elligatorswift_ours_ephemeral_serialized);
 
         // 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
         let e_private_key = keypair.secret_key();
-        let elligatorswift_theirs_ephemeral = ElligatorSwift::from_array(elligatorswift_theirs_ephemeral_serialized);
-        let ecdh_ephemeral = ElligatorSwift::shared_secret(elligatorswitf_ours_ephemeral, elligatorswift_theirs_ephemeral, e_private_key, secp256k1::ellswift::ElligatorSwiftParty::A, None).to_secret_bytes();
-        //let ecdh = Self::ecdh(&e_private_key[..], &re_pub[..]);
+        let elligatorswift_theirs_ephemeral =
+            ElligatorSwift::from_array(elligatorswift_theirs_ephemeral_serialized);
+        let ecdh_ephemeral = ElligatorSwift::shared_secret(
+            elligatorswift_theirs_ephemeral,
+            elligatorswitf_ours_ephemeral,
+            e_private_key,
+            secp256k1::ellswift::ElligatorSwiftParty::B,
+            None,
+        )
+        .to_secret_bytes();
         Self::mix_key(self, &ecdh_ephemeral);
 
         // 5. appends `EncryptAndHash(s.public_key)` (64 bytes encrypted elligatorswift  public key, 16 bytes MAC)
@@ -188,13 +199,18 @@ impl Responder {
         self.encrypt_and_hash(&mut encrypted_static_pub_k)?;
         dbg!(&encrypted_static_pub_k);
         out[64..(64 + 16 + 64)].copy_from_slice(&encrypted_static_pub_k[..(64 + 16)]);
-        // note: 64+16+64 = 144>112
+        // note: 64+16+64 = 144
 
         // 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
-        //let s_private_key = self.s.secret_bytes();
         let s_private_key = self.s.secret_key();
-        let ecdh_static = ElligatorSwift::shared_secret(elligatorswift_ours_static, elligatorswift_theirs_ephemeral, s_private_key, secp256k1::ellswift::ElligatorSwiftParty::A, None).to_secret_bytes();
-        //let ecdh = Self::ecdh(&s_private_key[..], &re_pub_[..]);
+        let ecdh_static = ElligatorSwift::shared_secret(
+            elligatorswift_theirs_ephemeral,
+            elligatorswift_ours_static,
+            s_private_key,
+            secp256k1::ellswift::ElligatorSwiftParty::B,
+            None,
+        )
+        .to_secret_bytes();
         Self::mix_key(self, &ecdh_static[..]);
 
         // 7. appends `EncryptAndHash(SIGNATURE_NOISE_MESSAGE)` to the buffer

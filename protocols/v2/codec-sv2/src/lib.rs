@@ -72,7 +72,7 @@ impl State {
         }
     }
 
-    pub fn step_2(&mut self, message: [u8; 202]) -> core::result::Result<Self, Error> {
+    pub fn step_2(&mut self, message: [u8; 234]) -> core::result::Result<Self, Error> {
         match self {
             Self::HandShake(h) => match h {
                 HandshakeRole::Initiator(i) => {
