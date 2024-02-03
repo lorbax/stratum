@@ -18,7 +18,12 @@ pub trait HandshakeOp<Cipher: AeadCipher>: CipherState<Cipher> {
 
     fn mix_hash(&mut self, data: &[u8]) {
         let h = self.get_h();
+        //println!("Dentro mixhash");
+        //dbg!(&data);
+        //dbg!(&h);
+        //dbg!(data);
         let mut to_hash = Vec::with_capacity(32 + data.len());
+        //dbg!(&to_hash);
         to_hash.extend_from_slice(h);
         to_hash.extend_from_slice(data);
         *h = Sha256Hash::hash(&to_hash).to_byte_array();
@@ -96,14 +101,14 @@ pub trait HandshakeOp<Cipher: AeadCipher>: CipherState<Cipher> {
     }
 
     fn decrypt_and_hash(&mut self, ciphertext: &mut Vec<u8>) -> Result<(), aes_gcm::Error> {
-        dbg!(&ciphertext);
+        //dbg!(&ciphertext);
         let encrypted = ciphertext.clone();
         if self.get_k().is_some() {
             #[allow(clippy::clone_on_copy)]
             let h = self.get_h().clone();
-            println!("BBBBBB");
-            dbg!(self.decrypt_with_ad(&h, ciphertext))?;
-            println!("BBBBBB");
+            //println!("BBBBBB");
+            self.decrypt_with_ad(&h, ciphertext)?;
+            //println!("BBBBBB");
         };
         self.mix_hash(&encrypted);
         Ok(())
