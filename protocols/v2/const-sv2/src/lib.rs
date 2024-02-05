@@ -21,10 +21,10 @@ pub const RESPONDER_EXPECTED_HANDSHAKE_MESSAGE_LENGTH: usize = 64;
 
 /// If protocolName is less than or equal to 32 bytes in length, use protocolName with zero bytes
 /// appended to make 32 bytes. Otherwise, apply HASH to it. For name =
-/// "Noise_NX_secp256k1_ChaChaPoly_SHA256", we need the hash.
+/// "Noise_NX_EllSwiftXonly_ChaChaPoly_SHA256", we need the hash.
 pub const NOISE_HASHED_PROTOCOL_NAME_CHACHA: [u8; 32] = [
-    168, 246, 65, 106, 218, 197, 235, 205, 62, 183, 118, 131, 234, 247, 6, 174, 180, 164, 162, 125,
-    30, 121, 156, 182, 95, 117, 218, 138, 122, 135, 4, 65,
+    27, 97, 156, 90, 248, 120, 254, 68, 34, 119, 45, 129, 209, 41, 152, 82, 26, 137, 97, 115, 62,
+    44, 177, 60, 145, 24, 250, 214, 68, 188, 1, 128,
 ];
 
 // len = 1
