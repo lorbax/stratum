@@ -9,9 +9,15 @@ use crate::{
 };
 use aes_gcm::KeyInit;
 use chacha20poly1305::ChaCha20Poly1305;
-use secp256k1::{ellswift::ElligatorSwift, Keypair, Secp256k1, SecretKey};
+use const_sv2::INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH;
+use secp256k1::{
+    constants::ELLSWIFT_ENCODING_SIZE, ellswift::ElligatorSwift, Keypair, Secp256k1, SecretKey,
+};
 
 const VERSION: u16 = 0;
+
+const ENCRYPTED_ELLSWIFT_ENCODING_LENGTH: usize = 64 + 16;
+const ENCRYPTED_SIGNATURE_NOISE_MESSAGE_LENGTH: usize = 74 + 16;
 
 pub struct Responder {
     handshake_cipher: Option<ChaCha20Poly1305>,
@@ -123,8 +129,7 @@ impl Responder {
     /// #### 4.5.1.2 Responder
     ///
     /// 1. receives ephemeral public key message with ElligatorSwift encoding (64 bytes plaintext)
-    /// 2. obtain the 32 bytes encoding of x-coordinates of remote ephemeral PubKey parses public
-    ///    key as `re.public_key`
+    /// 2. parses these 64 byte as PubKey and interprets is as `re.public_key`
     /// 3. calls `MixHash(re.public_key)`
     /// 4. calls `DecryptAndHash()` on remaining bytes (i.e. on empty data with empty _k_, thus effectively only calls `MixHash()` on empty data)
     ///
@@ -135,9 +140,9 @@ impl Responder {
     ///    `e.public_key` to the buffer
     /// 3. calls `MixHash(e.public_key)`
     /// 4. calls `MixKey(ECDH(e.private_key, re.public_key))`
-    /// 5. appends `EncryptAndHash(s.public_key)` (64 bytes encrypted elliswift public key, 16 bytes MAC)
+    /// 5. appends `EncryptAndHash(s.public_key)` (80 bytes: 64 bytes encrypted elliswift public key, 16 bytes MAC)
     /// 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
-    /// 7. appends `EncryptAndHash(SIGNATURE_NOISE_MESSAGE)` (74 bytes) to the buffer
+    /// 7. appends `EncryptAndHash(SIGNATURE_NOISE_MESSAGE)` (74 + 16 bytes) to the buffer
     /// 8. submits the buffer for sending to the initiator
     /// 9. return pair of CipherState objects, the first for encrypting transport messages from initiator to responder, and the second for messages in the other direction:
     ///    1. sets `temp_k1, temp_k2 = HKDF(ck, zerolen, 2)`
@@ -158,18 +163,25 @@ impl Responder {
     /// Message length: 232 bytes
     pub fn step_1(
         &mut self,
-        elligatorswift_theirs_ephemeral_serialized: [u8; 64],
-    ) -> Result<([u8; 234], NoiseCodec), aes_gcm::Error> {
+        elligatorswift_theirs_ephemeral_serialized: [u8; ELLSWIFT_ENCODING_SIZE],
+    ) -> Result<
+        (
+            [u8; INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH],
+            NoiseCodec,
+        ),
+        aes_gcm::Error,
+    > {
         // 4.5.1.2 Responder
         Self::mix_hash(self, &elligatorswift_theirs_ephemeral_serialized[..]);
         Self::decrypt_and_hash(self, &mut vec![])?;
 
         // 4.5.2.1 Responder
-        let mut out = [0; 234];
+        let mut out = [0; INITIATOR_EXPECTED_HANDSHAKE_MESSAGE_LENGTH];
         let keypair = self.e;
         let elligatorswitf_ours_ephemeral = ElligatorSwift::from_pubkey(keypair.public_key());
         let elligatorswift_ours_ephemeral_serialized = elligatorswitf_ours_ephemeral.to_array();
-        out[..64].copy_from_slice(&elligatorswift_ours_ephemeral_serialized[..64]);
+        out[..ELLSWIFT_ENCODING_SIZE]
+            .copy_from_slice(&elligatorswift_ours_ephemeral_serialized[..ELLSWIFT_ENCODING_SIZE]);
 
         // 3. calls `MixHash(e.public_key)`
         // what is here is not the public key encoded with ElligatorSwift, but the x-coordinate of
@@ -192,13 +204,15 @@ impl Responder {
         Self::mix_key(self, &ecdh_ephemeral);
 
         // 5. appends `EncryptAndHash(s.public_key)` (64 bytes encrypted elligatorswift  public key, 16 bytes MAC)
-        let mut encrypted_static_pub_k = vec![0; 64];
+        let mut encrypted_static_pub_k = vec![0; ELLSWIFT_ENCODING_SIZE];
         let elligatorswift_ours_static = ElligatorSwift::from_pubkey(self.s.public_key());
-        let elligatorswift_ours_static_serialized: [u8; 64] = elligatorswift_ours_static.to_array();
-        encrypted_static_pub_k[..64].copy_from_slice(&elligatorswift_ours_static_serialized[0..64]);
+        let elligatorswift_ours_static_serialized: [u8; ELLSWIFT_ENCODING_SIZE] =
+            elligatorswift_ours_static.to_array();
+        encrypted_static_pub_k[..ELLSWIFT_ENCODING_SIZE]
+            .copy_from_slice(&elligatorswift_ours_static_serialized[0..ELLSWIFT_ENCODING_SIZE]);
         self.encrypt_and_hash(&mut encrypted_static_pub_k)?;
-        dbg!(&encrypted_static_pub_k);
-        out[64..(64 + 16 + 64)].copy_from_slice(&encrypted_static_pub_k[..(64 + 16)]);
+        out[ELLSWIFT_ENCODING_SIZE..(ELLSWIFT_ENCODING_SIZE + ENCRYPTED_ELLSWIFT_ENCODING_LENGTH)]
+            .copy_from_slice(&encrypted_static_pub_k[..(ENCRYPTED_ELLSWIFT_ENCODING_LENGTH)]);
         // note: 64+16+64 = 144
 
         // 6. calls `MixKey(ECDH(s.private_key, re.public_key))`
@@ -221,10 +235,14 @@ impl Responder {
         let not_valid_after = valid_from as u32 + self.cert_validity;
         let signature_noise_message =
             self.get_signature(VERSION, valid_from as u32, not_valid_after);
-        let mut signature_part = Vec::with_capacity(74 + 16);
+        let mut signature_part = Vec::with_capacity(ENCRYPTED_SIGNATURE_NOISE_MESSAGE_LENGTH);
         signature_part.extend_from_slice(&signature_noise_message[..]);
         Self::encrypt_and_hash(self, &mut signature_part)?;
-        out[144..(144 + 74 + 16)].copy_from_slice(&signature_part[..(74 + 16)]);
+        let ephemeral_plus_static_encrypted_length =
+            ELLSWIFT_ENCODING_SIZE + ENCRYPTED_ELLSWIFT_ENCODING_LENGTH;
+        out[ephemeral_plus_static_encrypted_length
+            ..(ephemeral_plus_static_encrypted_length + ENCRYPTED_SIGNATURE_NOISE_MESSAGE_LENGTH)]
+            .copy_from_slice(&signature_part[..ENCRYPTED_SIGNATURE_NOISE_MESSAGE_LENGTH]);
 
         // 9. return pair of CipherState objects, the first for encrypting transport messages from initiator to responder, and the second for messages in the other direction:
         let ck = Self::get_ck(self);
