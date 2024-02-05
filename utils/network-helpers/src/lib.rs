@@ -14,6 +14,7 @@ pub mod noise_connection_tokio;
 pub mod plain_connection_tokio;
 
 use async_channel::{Receiver, RecvError, SendError, Sender};
+
 use codec_sv2::{Error as CodecError, HandShakeFrame, HandshakeRole, StandardEitherFrame};
 use futures::lock::Mutex;
 use std::{

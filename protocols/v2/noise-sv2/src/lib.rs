@@ -5,7 +5,6 @@
 use aes_gcm::aead::Buffer;
 pub use aes_gcm::aead::Error as AeadError;
 use cipher_state::GenericCipher;
-use secp256k1::ellswift::ElligatorSwift;
 mod aed_cipher;
 mod cipher_state;
 mod error;
@@ -16,14 +15,6 @@ mod signature_message;
 #[cfg(test)]
 mod test;
 
-trait GetElliSwiftPubkey {
-    fn get_elliswift_pubkey_encoding(&self, key_type: TypePubKey) -> ElligatorSwift;
-}
-
-enum TypePubKey {
-    //Static,
-    Ephemeral,
-}
 struct PseudoHasher(Vec<u8>);
 
 impl core::hash::Hasher for PseudoHasher {
