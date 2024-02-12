@@ -158,9 +158,7 @@ where
             Ok(JobDeclaration::SubmitSolution(message)) => {
                 info!("Received SubmitSolution");
                 debug!("SubmitSolution: {:?}", message);
-                self_
-                    .safe_lock(|x| x.handle_submit_solution(message))
-                    .map_err(|e| crate::Error::PoisonLock(e.to_string()))?
+                Self::handle_submit_solution(self_, message)
             }
 
             Ok(_) => todo!(),
@@ -184,5 +182,8 @@ where
         &mut self,
         message: ProvideMissingTransactionsSuccess,
     ) -> Result<SendTo, Error>;
-    fn handle_submit_solution(&mut self, message: SubmitSolutionJd) -> Result<SendTo, Error>;
+    fn handle_submit_solution(
+        self_: Arc<Mutex<Self>>,
+        message: SubmitSolutionJd,
+    ) -> Result<SendTo, Error>;
 }
