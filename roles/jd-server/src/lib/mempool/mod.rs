@@ -106,6 +106,7 @@ impl JDsMempool {
             .ok_or(JdsMempoolError::NoClient)?;
 
         while let Ok(block_hex) = receiver.recv().await {
+            dbg!(&block_hex);
             match mini_rpc_client::MiniRpcClient::submit_block(&client, block_hex).await {
                 Ok(_) => return Ok(()),
                 Err(e) => JdsMempoolError::Rpc(e),

@@ -311,11 +311,14 @@ impl TemplateRx {
                 .safe_lock(|s| s.test_only_do_not_send_solution_to_tp)
                 .unwrap()
             {
+                println!("JD_CLIENT SOLUTION");
+                dbg!(&solution);
                 let sv2_frame: StdFrame = PoolMessages::TemplateDistribution(
                     TemplateDistribution::SubmitSolution(solution),
                 )
                 .try_into()
                 .expect("Failed to convert solution to sv2 frame!");
+                dbg!(&sv2_frame);
                 Self::send(&self_, sv2_frame).await
             }
         }

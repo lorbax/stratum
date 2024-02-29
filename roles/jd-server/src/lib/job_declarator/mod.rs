@@ -71,6 +71,7 @@ impl JobDeclaratorDownstream {
     }
 
     fn get_block_hex(self_mutex: Arc<Mutex<Self>>, message: SubmitSolutionJd) -> Option<String> {
+        dbg!(&message);
         //TODO: implement logic for success or error
         let (last_declare, tx_list, _) = match self_mutex
             .safe_lock(|x| x.declared_mining_job.take())
@@ -81,6 +82,7 @@ impl JobDeclaratorDownstream {
         };
         let block: Block =
             roles_logic_sv2::utils::BlockCreator::new(last_declare, tx_list, message).into();
+        dbg!(&block);
         Some(hex::encode(serialize(&block)))
     }
 
@@ -134,6 +136,7 @@ impl JobDeclaratorDownstream {
                             }
                             Ok(SendTo::None(m)) => match m {
                                 Some(JobDeclaration::SubmitSolution(message)) => {
+                                    dbg!(&message);
                                     let hexdata = match JobDeclaratorDownstream::get_block_hex(
                                         self_mutex.clone(),
                                         message,
@@ -145,6 +148,7 @@ impl JobDeclaratorDownstream {
                                             break;
                                         }
                                     };
+                                    dbg!(&hexdata);
 
                                     let _ = submit_solution_sender.send(hexdata).await;
                                 }
