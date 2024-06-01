@@ -7,7 +7,7 @@ use crate::{
     Error, ShortTxId,
 };
 use alloc::vec::Vec;
-use serde::{ser, ser::SerializeTuple, Deserialize, Deserializer, Serialize};
+use serde::{ser, ser::SerializeTuple, ser::SerializeSeq, Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct Seq064K<'s, T: Clone + Serialize + TryFromBSlice<'s>> {
@@ -101,11 +101,20 @@ impl<'s, T: Clone + FixedSize + Serialize + TryFromBSlice<'s>> Serialize for Seq
                 seq.end()
             }
             (None, Some(data)) => {
-                let tuple = (data.len() as u16, &data[..]);
-                let mut seq = serializer.serialize_tuple(2)?;
-                seq.serialize_element(&tuple.0)?;
-                seq.serialize_element(tuple.1)?;
-                seq.end()
+                if serializer.is_human_readable() {
+                    let data_ = self.data.clone().unwrap();
+                    let mut seq = serializer.serialize_seq(Some(data_.len()))?;
+                    for item in data_ {
+                        seq.serialize_element(&item)?;
+                    }
+                    seq.end()
+                } else {
+                    let tuple = (data.len() as u16, &data[..]);
+                    let mut seq = serializer.serialize_tuple(2)?;
+                    seq.serialize_element(&tuple.0)?;
+                    seq.serialize_element(tuple.1)?;
+                    seq.end()
+                }
             }
             _ => panic!(),
         }

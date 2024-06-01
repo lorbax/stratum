@@ -81,6 +81,18 @@ impl<'a> TryFromBSlice<'a> for bool {
     }
 }
 
+impl<'a> TryFromBSlice<'a> for u8 {
+    type Error = Error;
+
+    #[inline]
+    fn try_from_slice(val: &'a [u8]) -> Result<Self, Error> {
+        if val.len() != 1 {
+            return Err(Error::InvalidU16Size(val.len()));
+        }
+        Ok(u8::from_le_bytes([val[0]]))
+    }
+}
+
 impl<'a> TryFromBSlice<'a> for u16 {
     type Error = Error;
 

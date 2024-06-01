@@ -4,7 +4,10 @@ use super::{
 };
 use crate::primitives::{FixedSize, GetSize};
 use alloc::vec::Vec;
-use serde::{ser, ser::SerializeTuple, Deserialize, Deserializer, Serialize};
+use serde::{
+    ser::{self, SerializeSeq, SerializeTuple},
+    Deserialize, Deserializer, Serialize,
+};
 
 #[derive(Debug, Clone)]
 pub struct Sv2Option<'s, T: Serialize + TryFromBSlice<'s> + Clone> {
@@ -65,11 +68,20 @@ impl<'s, T: Clone + Serialize + TryFromBSlice<'s>> Serialize for Sv2Option<'s, T
                 seq.end()
             }
             (None, Some(data)) => {
-                let tuple = (data.len() as u8, &data[..]);
-                let mut seq = serializer.serialize_tuple(2)?;
-                seq.serialize_element(&tuple.0)?;
-                seq.serialize_element(tuple.1)?;
-                seq.end()
+                if serializer.is_human_readable() {
+                    let data_ = self.data.clone().unwrap();
+                    let mut seq = serializer.serialize_seq(Some(data_.len()))?;
+                    for item in data_ {
+                        seq.serialize_element(&item)?;
+                    }
+                    seq.end()
+                } else {
+                    let tuple = (data.len() as u8, &data[..]);
+                    let mut seq = serializer.serialize_tuple(2)?;
+                    seq.serialize_element(&tuple.0)?;
+                    seq.serialize_element(tuple.1)?;
+                    seq.end()
+                }
             }
             _ => panic!(),
         }
