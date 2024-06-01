@@ -7,7 +7,11 @@ use crate::{
     Error, ShortTxId,
 };
 use alloc::vec::Vec;
-use serde::{ser, ser::SerializeTuple, ser::SerializeSeq, Deserialize, Deserializer, Serialize};
+use serde::{
+    ser,
+    ser::{SerializeSeq, SerializeTuple},
+    Deserialize, Deserializer, Serialize,
+};
 
 #[derive(Debug, Clone)]
 pub struct Seq064K<'s, T: Clone + Serialize + TryFromBSlice<'s>> {

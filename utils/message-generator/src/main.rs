@@ -452,18 +452,18 @@ mod test {
         net::{setup_as_downstream, setup_as_upstream},
     };
     use codec_sv2::{Frame, Sv2Frame};
+    use key_utils::Secp256k1PublicKey;
     use roles_logic_sv2::{
-        mining_sv2::{
-            CloseChannel, NewExtendedMiningJob, OpenExtendedMiningChannel,
-            OpenExtendedMiningChannelSuccess, SetCustomMiningJob, SetTarget, NewMiningJob,
-        },
+        common_messages_sv2::{Protocol, SetupConnection},
         job_declaration_sv2::DeclareMiningJob,
-        common_messages_sv2::{SetupConnection, Protocol},
+        mining_sv2::{
+            CloseChannel, NewExtendedMiningJob, NewMiningJob, OpenExtendedMiningChannel,
+            OpenExtendedMiningChannelSuccess, SetCustomMiningJob, SetTarget,
+        },
         parsers::{CommonMessages, Mining},
     };
-    use std::{io::Write, convert::TryInto};
+    use std::{convert::TryInto, io::Write};
     use tokio::join;
-    use key_utils::Secp256k1PublicKey;
 
     // The following test see that the composition serialise fist and deserialize
     // second is the identity function (on an example message)
@@ -600,8 +600,6 @@ mod test {
         assert!(message_new == message);
     }
 
-
-
     #[test]
     fn test_serialize_and_deserialize_6_dmj() {
         let short_tx_id_inner_: Vec<u8> = vec![0, 1, 2, 3, 4, 5];
@@ -616,7 +614,7 @@ mod test {
             coinbase_prefix: binary_sv2::B064K::try_from(prefix_inner_as_ref).unwrap(),
             coinbase_suffix: binary_sv2::B064K::try_from(prefix_inner_as_ref).unwrap(),
             tx_short_hash_nonce: 1,
-            tx_short_hash_list:  binary_sv2::Seq064K::new(vec![short_tx_id]).unwrap(),            
+            tx_short_hash_list: binary_sv2::Seq064K::new(vec![short_tx_id]).unwrap(),
             tx_hash_list_hash: binary_sv2::U256::try_from(vec![1_u8; 32]).unwrap(),
             excess_data: binary_sv2::B064K::try_from(prefix_inner_as_ref).unwrap(),
         };
@@ -632,15 +630,18 @@ mod test {
 
     #[test]
     fn test_serialize_and_deserialize_7_nmj() {
-        let inner_: Vec<u8> = vec![141,193,6,239,151,79,49,202,237,183,207,121,56,40,107,153,235,208,66,215,81,186,3,16,215,110,130,182,37,198,98,251];
+        let inner_: Vec<u8> = vec![
+            141, 193, 6, 239, 151, 79, 49, 202, 237, 183, 207, 121, 56, 40, 107, 153, 235, 208, 66,
+            215, 81, 186, 3, 16, 215, 110, 130, 182, 37, 198, 98, 251,
+        ];
         let inner = inner_.as_slice();
-       let message = NewMiningJob {
+        let message = NewMiningJob {
             channel_id: 1,
             job_id: 2,
             min_ntime: binary_sv2::Sv2Option::try_from(vec![]).unwrap(),
             version: 536870912,
             merkle_root: binary_sv2::B032::try_from(inner).unwrap(),
-        }; 
+        };
         let message_as_serde_value = serde_json::to_value(message.clone()).unwrap();
         let message_as_string = serde_json::to_string(&message_as_serde_value).unwrap();
         let message_new: NewMiningJob = serde_json::from_str(&message_as_string).unwrap();
@@ -845,7 +846,7 @@ mod test {
                 "translator_sv2",
                 "--",
                 "-c",
-                "translator/config-examples/tproxy-config-hosted-pool-example.toml"
+                "translator/config-examples/tproxy-config-hosted-pool-example.toml",
             ],
             ExternalCommandConditions::new_with_timer_secs(10)
                 .continue_if_std_out_have("PROXY INITIALIZED")
