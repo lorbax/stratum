@@ -239,7 +239,15 @@ impl<'s> Sv2Option<'s, U256<'s>> {
                 data: Some(data),
             }
         } else {
-            panic!()
+            // this is an already valid seq should be safe to call the unwraps.
+            // also this library shouldn't be used for priduction envs so is ok do thigs like this
+            // one
+            let data = self.seq.unwrap().parse().unwrap();
+            let data = data.into_iter().map(|i| i.into_static()).collect();
+            Sv2Option {
+                seq: None,
+                data: Some(data),
+            }
         }
     }
     pub fn inner_as_ref(&self) -> &[&[u8]] {
@@ -254,7 +262,14 @@ impl<'s> Sv2Option<'s, u32> {
                 data: Some(inner),
             }
         } else {
-            panic!()
+            // this is an already valid seq should be safe to call the unwraps.
+            // also this library shouldn't be used for priduction envs so is ok do thigs like this
+            // one
+            let data = self.seq.unwrap().parse().unwrap();
+            Sv2Option {
+                seq: None,
+                data: Some(data),
+            }
         }
     }
 }

@@ -243,7 +243,15 @@ impl<'s> Seq0255<'s, U256<'s>> {
                 data: Some(data),
             }
         } else {
-            panic!()
+            // this is an already valid seq should be safe to call the unwraps.
+            // also this library shouldn't be used for priduction envs so is ok do thigs like this
+            // one
+            let data = self.seq.unwrap().parse().unwrap();
+            let data = data.into_iter().map(|i| i.into_static()).collect();
+            Seq0255 {
+                seq: None,
+                data: Some(data),
+            }
         }
     }
     pub fn inner_as_ref(&self) -> &[&[u8]] {
@@ -258,7 +266,14 @@ impl<'s> Seq0255<'s, u32> {
                 data: Some(inner),
             }
         } else {
-            panic!()
+            // this is an already valid seq should be safe to call the unwraps.
+            // also this library shouldn't be used for priduction envs so is ok do thigs like this
+            // one
+            let data = self.seq.unwrap().parse().unwrap();
+            Seq0255 {
+                seq: None,
+                data: Some(data),
+            }
         }
     }
 }
