@@ -39,6 +39,7 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use stratum_common::bitcoin::BlockHash;
@@ -98,6 +99,7 @@ pub struct Upstream {
     // and the upstream just needs to occasionally check if it has changed more than
     // than the configured percentage
     pub(super) difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
+    cancellation_token: CancellationToken,
 }
 
 impl PartialEq for Upstream {
@@ -124,6 +126,7 @@ impl Upstream {
         tx_status: status::Sender,
         target: Arc<Mutex<Vec<u8>>>,
         difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
+        cancellation_token: CancellationToken,
     ) -> ProxyResult<'static, Arc<Mutex<Self>>> {
         // Connect to the SV2 Upstream role retry connection every 5 seconds.
         let socket = loop {
@@ -171,6 +174,7 @@ impl Upstream {
             tx_status,
             target,
             difficulty_config,
+            cancellation_token,
         })))
     }
 
@@ -259,6 +263,9 @@ impl Upstream {
     #[allow(clippy::result_large_err)]
     pub fn parse_incoming(self_: Arc<Mutex<Self>>) -> ProxyResult<'static, ()> {
         let clone = self_.clone();
+        let cancellation_token = self_.safe_lock(|s| s.cancellation_token.clone()).unwrap();
+        let token1 = cancellation_token.clone();
+        let token2 = cancellation_token.clone();
         let (
             tx_frame,
             tx_sv2_extranonce,
@@ -282,155 +289,175 @@ impl Upstream {
             let self_ = self_.clone();
             let tx_status = tx_status.clone();
             task::spawn(async move {
-                // No need to start diff management immediatly
-                async_std::task::sleep(Duration::from_secs(10)).await;
-                loop {
-                    handle_result!(tx_status, Self::try_update_hashrate(self_.clone()).await);
+                let task = task::spawn(async move {
+                    // No need to start diff management immediatly
+                    async_std::task::sleep(Duration::from_secs(10)).await;
+                    loop {
+                        handle_result!(tx_status, Self::try_update_hashrate(self_.clone()).await);
+                    }
+                });
+                tokio::select! {
+                    _ = task => {},
+                    _ = token1.cancelled() => {},
                 }
             });
         }
 
         task::spawn(async move {
-            loop {
-                // Waiting to receive a message from the SV2 Upstream role
-                let incoming = handle_result!(tx_status, recv.recv().await);
-                let mut incoming: StdFrame = handle_result!(tx_status, incoming.try_into());
-                // On message receive, get the message type from the message header and get the
-                // message payload
-                let message_type =
-                    incoming
-                        .get_header()
-                        .ok_or(super::super::error::Error::FramingSv2(
-                            framing_sv2::Error::ExpectedSv2Frame,
-                        ));
+            let task = task::spawn(async move {
+                loop {
+                    // Waiting to receive a message from the SV2 Upstream role
+                    let incoming = handle_result!(tx_status, recv.recv().await);
+                    let mut incoming: StdFrame = handle_result!(tx_status, incoming.try_into());
+                    // On message receive, get the message type from the message header and get the
+                    // message payload
+                    let message_type =
+                        incoming
+                            .get_header()
+                            .ok_or(super::super::error::Error::FramingSv2(
+                                framing_sv2::Error::ExpectedSv2Frame,
+                            ));
 
-                let message_type = handle_result!(tx_status, message_type).msg_type();
+                    let message_type = handle_result!(tx_status, message_type).msg_type();
 
-                let payload = incoming.payload();
+                    let payload = incoming.payload();
 
-                // Since this is not communicating with an SV2 proxy, but instead a custom SV1
-                // proxy where the routing logic is handled via the `Upstream`'s communication
-                // channels, we do not use the mining routing logic in the SV2 library and specify
-                // no mining routing logic here
-                let routing_logic = MiningRoutingLogic::None;
+                    // Since this is not communicating with an SV2 proxy, but instead a custom SV1
+                    // proxy where the routing logic is handled via the `Upstream`'s communication
+                    // channels, we do not use the mining routing logic in the SV2 library and specify
+                    // no mining routing logic here
+                    let routing_logic = MiningRoutingLogic::None;
 
-                // Gets the response message for the received SV2 Upstream role message
-                // `handle_message_mining` takes care of the SetupConnection +
-                // SetupConnection.Success
-                let next_message_to_send = Upstream::handle_message_mining(
-                    self_.clone(),
-                    message_type,
-                    payload,
-                    routing_logic,
-                );
+                    // Gets the response message for the received SV2 Upstream role message
+                    // `handle_message_mining` takes care of the SetupConnection +
+                    // SetupConnection.Success
+                    let next_message_to_send = Upstream::handle_message_mining(
+                        self_.clone(),
+                        message_type,
+                        payload,
+                        routing_logic,
+                    );
 
-                // Routes the incoming messages accordingly
-                match next_message_to_send {
-                    // No translation required, simply respond to SV2 pool w a SV2 message
-                    Ok(SendTo::Respond(message_for_upstream)) => {
-                        let message = Message::Mining(message_for_upstream);
+                    // Routes the incoming messages accordingly
+                    match next_message_to_send {
+                        // No translation required, simply respond to SV2 pool w a SV2 message
+                        Ok(SendTo::Respond(message_for_upstream)) => {
+                            let message = Message::Mining(message_for_upstream);
 
-                        let frame: StdFrame = handle_result!(tx_status, message.try_into());
-                        let frame: EitherFrame = frame.into();
+                            let frame: StdFrame = handle_result!(tx_status, message.try_into());
+                            let frame: EitherFrame = frame.into();
 
-                        // Relay the response message to the Upstream role
-                        handle_result!(
-                            tx_status,
-                            tx_frame.send(frame).await.map_err(|e| {
-                                super::super::error::Error::ChannelErrorSender(
-                                    super::super::error::ChannelSendError::General(e.to_string()),
-                                )
-                            })
-                        );
-                    }
-                    // Does not send the messages anywhere, but instead handle them internally
-                    Ok(SendTo::None(Some(m))) => {
-                        match m {
-                            Mining::OpenExtendedMiningChannelSuccess(m) => {
-                                let prefix_len = m.extranonce_prefix.len();
-                                // update upstream_extranonce1_size for tracking
-                                let miner_extranonce2_size = self_
-                                    .safe_lock(|u| {
-                                        u.upstream_extranonce1_size = prefix_len;
-                                        u.min_extranonce_size as usize
-                                    })
-                                    .map_err(|_e| PoisonLock);
-                                let miner_extranonce2_size =
-                                    handle_result!(tx_status, miner_extranonce2_size);
-                                let extranonce_prefix: Extranonce = m.extranonce_prefix.into();
-                                // Create the extended extranonce that will be saved in bridge and
-                                // it will be used to open downstream (sv1) channels
-                                // range 0 is the extranonce1 from upstream
-                                // range 1 is the extranonce1 added by the tproxy
-                                // range 2 is the extranonce2 used by the miner for rolling
-                                // range 0 + range 1 is the extranonce1 sent to the miner
-                                let tproxy_e1_len = super::super::utils::proxy_extranonce1_len(
-                                    m.extranonce_size as usize,
-                                    miner_extranonce2_size,
-                                );
-                                let range_0 = 0..prefix_len; // upstream extranonce1
-                                let range_1 = prefix_len..prefix_len + tproxy_e1_len; // downstream extranonce1
-                                let range_2 = prefix_len + tproxy_e1_len
-                                    ..prefix_len + m.extranonce_size as usize; // extranonce2
-                                let extended = handle_result!(tx_status, ExtendedExtranonce::from_upstream_extranonce(
-                                    extranonce_prefix.clone(), range_0.clone(), range_1.clone(), range_2.clone(),
-                                ).ok_or_else(|| InvalidExtranonce(format!("Impossible to create a valid extended extranonce from {:?} {:?} {:?} {:?}",
-                                    extranonce_prefix,range_0,range_1,range_2))));
-                                handle_result!(
-                                    tx_status,
-                                    tx_sv2_extranonce.send((extended, m.channel_id)).await
-                                );
-                            }
-                            Mining::NewExtendedMiningJob(m) => {
-                                let job_id = m.job_id;
-                                let res = self_
-                                    .safe_lock(|s| {
-                                        let _ = s.job_id.insert(job_id);
-                                    })
-                                    .map_err(|_e| PoisonLock);
-                                handle_result!(tx_status, res);
-                                handle_result!(tx_status, tx_sv2_new_ext_mining_job.send(m).await);
-                            }
-                            Mining::SetNewPrevHash(m) => {
-                                handle_result!(tx_status, tx_sv2_set_new_prev_hash.send(m).await);
-                            }
-                            Mining::CloseChannel(_m) => {
-                                error!("Received Mining::CloseChannel msg from upstream!");
-                                handle_result!(tx_status, Err(NoUpstreamsConnected));
-                            }
-                            Mining::OpenMiningChannelError(_)
-                            | Mining::UpdateChannelError(_)
-                            | Mining::SubmitSharesError(_)
-                            | Mining::SetCustomMiningJobError(_) => {
-                                error!("parse_incoming SV2 protocol error Message");
-                                handle_result!(tx_status, Err(m));
-                            }
-                            // impossible state: handle_message_mining only returns
-                            // the above 3 messages in the Ok(SendTo::None(Some(m))) case to be sent
-                            // to the bridge for translation.
-                            _ => panic!(),
+                            // Relay the response message to the Upstream role
+                            handle_result!(
+                                tx_status,
+                                tx_frame.send(frame).await.map_err(|e| {
+                                    super::super::error::Error::ChannelErrorSender(
+                                        super::super::error::ChannelSendError::General(
+                                            e.to_string(),
+                                        ),
+                                    )
+                                })
+                            );
                         }
-                    }
-                    Ok(SendTo::None(None)) => (),
-                    // No need to handle impossible state just panic cause are impossible and we
-                    // will never panic ;-) Verified: handle_message_mining only either panics,
-                    // returns Ok(SendTo::None(None)) or Ok(SendTo::None(Some(m))), or returns Err
-                    Ok(_) => panic!(),
-                    Err(e) => {
-                        let status = status::Status {
-                            state: status::State::UpstreamShutdown(UpstreamIncoming(e)),
-                        };
-                        error!(
-                            "TERMINATING: Error handling pool role message: {:?}",
-                            status
-                        );
-                        if let Err(e) = tx_status.send(status).await {
-                            error!("Status channel down: {:?}", e);
+                        // Does not send the messages anywhere, but instead handle them internally
+                        Ok(SendTo::None(Some(m))) => {
+                            match m {
+                                Mining::OpenExtendedMiningChannelSuccess(m) => {
+                                    let prefix_len = m.extranonce_prefix.len();
+                                    // update upstream_extranonce1_size for tracking
+                                    let miner_extranonce2_size = self_
+                                        .safe_lock(|u| {
+                                            u.upstream_extranonce1_size = prefix_len;
+                                            u.min_extranonce_size as usize
+                                        })
+                                        .map_err(|_e| PoisonLock);
+                                    let miner_extranonce2_size =
+                                        handle_result!(tx_status, miner_extranonce2_size);
+                                    let extranonce_prefix: Extranonce = m.extranonce_prefix.into();
+                                    // Create the extended extranonce that will be saved in bridge and
+                                    // it will be used to open downstream (sv1) channels
+                                    // range 0 is the extranonce1 from upstream
+                                    // range 1 is the extranonce1 added by the tproxy
+                                    // range 2 is the extranonce2 used by the miner for rolling
+                                    // range 0 + range 1 is the extranonce1 sent to the miner
+                                    let tproxy_e1_len = super::super::utils::proxy_extranonce1_len(
+                                        m.extranonce_size as usize,
+                                        miner_extranonce2_size,
+                                    );
+                                    let range_0 = 0..prefix_len; // upstream extranonce1
+                                    let range_1 = prefix_len..prefix_len + tproxy_e1_len; // downstream extranonce1
+                                    let range_2 = prefix_len + tproxy_e1_len
+                                        ..prefix_len + m.extranonce_size as usize; // extranonce2
+                                    let extended = handle_result!(tx_status, ExtendedExtranonce::from_upstream_extranonce(
+                                        extranonce_prefix.clone(), range_0.clone(), range_1.clone(), range_2.clone(),
+                                    ).ok_or_else(|| InvalidExtranonce(format!("Impossible to create a valid extended extranonce from {:?} {:?} {:?} {:?}",
+                                        extranonce_prefix,range_0,range_1,range_2))));
+                                    handle_result!(
+                                        tx_status,
+                                        tx_sv2_extranonce.send((extended, m.channel_id)).await
+                                    );
+                                }
+                                Mining::NewExtendedMiningJob(m) => {
+                                    let job_id = m.job_id;
+                                    let res = self_
+                                        .safe_lock(|s| {
+                                            let _ = s.job_id.insert(job_id);
+                                        })
+                                        .map_err(|_e| PoisonLock);
+                                    handle_result!(tx_status, res);
+                                    handle_result!(
+                                        tx_status,
+                                        tx_sv2_new_ext_mining_job.send(m).await
+                                    );
+                                }
+                                Mining::SetNewPrevHash(m) => {
+                                    handle_result!(
+                                        tx_status,
+                                        tx_sv2_set_new_prev_hash.send(m).await
+                                    );
+                                }
+                                Mining::CloseChannel(_m) => {
+                                    error!("Received Mining::CloseChannel msg from upstream!");
+                                    handle_result!(tx_status, Err(NoUpstreamsConnected));
+                                }
+                                Mining::OpenMiningChannelError(_)
+                                | Mining::UpdateChannelError(_)
+                                | Mining::SubmitSharesError(_)
+                                | Mining::SetCustomMiningJobError(_) => {
+                                    error!("parse_incoming SV2 protocol error Message");
+                                    handle_result!(tx_status, Err(m));
+                                }
+                                // impossible state: handle_message_mining only returns
+                                // the above 3 messages in the Ok(SendTo::None(Some(m))) case to be sent
+                                // to the bridge for translation.
+                                _ => panic!(),
+                            }
                         }
+                        Ok(SendTo::None(None)) => (),
+                        // No need to handle impossible state just panic cause are impossible and we
+                        // will never panic ;-) Verified: handle_message_mining only either panics,
+                        // returns Ok(SendTo::None(None)) or Ok(SendTo::None(Some(m))), or returns Err
+                        Ok(_) => panic!(),
+                        Err(e) => {
+                            let status = status::Status {
+                                state: status::State::UpstreamShutdown(UpstreamIncoming(e)),
+                            };
+                            error!(
+                                "TERMINATING: Error handling pool role message: {:?}",
+                                status
+                            );
+                            if let Err(e) = tx_status.send(status).await {
+                                error!("Status channel down: {:?}", e);
+                            }
 
-                        break;
+                            break;
+                        }
                     }
                 }
+            });
+            tokio::select! {
+                _ = task => {},
+                _ = token2.cancelled() => {},
             }
         });
 
@@ -459,6 +486,7 @@ impl Upstream {
 
     #[allow(clippy::result_large_err)]
     pub fn handle_submit(self_: Arc<Mutex<Self>>) -> ProxyResult<'static, ()> {
+        let cancellation_token = self_.safe_lock(|s| s.cancellation_token.clone()).unwrap();
         let clone = self_.clone();
         let (tx_frame, receiver, tx_status) = clone
             .safe_lock(|s| {
@@ -469,43 +497,50 @@ impl Upstream {
                 )
             })
             .map_err(|_| PoisonLock)?;
-
         task::spawn(async move {
-            loop {
-                let mut sv2_submit: SubmitSharesExtended =
-                    handle_result!(tx_status, receiver.recv().await);
+            let task = task::spawn(async move {
+                loop {
+                    let mut sv2_submit: SubmitSharesExtended =
+                        handle_result!(tx_status, receiver.recv().await);
 
-                let channel_id = self_
-                    .safe_lock(|s| {
-                        s.channel_id
-                            .ok_or(super::super::error::Error::RolesSv2Logic(
-                                RolesLogicError::NotFoundChannelId,
-                            ))
-                    })
-                    .map_err(|_e| PoisonLock);
-                sv2_submit.channel_id =
-                    handle_result!(tx_status, handle_result!(tx_status, channel_id));
-                let job_id = Self::get_job_id(&self_);
-                sv2_submit.job_id = handle_result!(tx_status, handle_result!(tx_status, job_id));
+                    let channel_id = self_
+                        .safe_lock(|s| {
+                            s.channel_id
+                                .ok_or(super::super::error::Error::RolesSv2Logic(
+                                    RolesLogicError::NotFoundChannelId,
+                                ))
+                        })
+                        .map_err(|_e| PoisonLock);
+                    sv2_submit.channel_id =
+                        handle_result!(tx_status, handle_result!(tx_status, channel_id));
+                    let job_id = Self::get_job_id(&self_);
+                    sv2_submit.job_id =
+                        handle_result!(tx_status, handle_result!(tx_status, job_id));
 
-                let message = Message::Mining(
-                    roles_logic_sv2::parsers::Mining::SubmitSharesExtended(sv2_submit),
-                );
+                    let message = Message::Mining(
+                        roles_logic_sv2::parsers::Mining::SubmitSharesExtended(sv2_submit),
+                    );
 
-                let frame: StdFrame = handle_result!(tx_status, message.try_into());
-                // Doesnt actually send because of Braiins Pool issue that needs to be fixed
+                    let frame: StdFrame = handle_result!(tx_status, message.try_into());
+                    // Doesnt actually send because of Braiins Pool issue that needs to be fixed
 
-                let frame: EitherFrame = frame.into();
-                handle_result!(
-                    tx_status,
-                    tx_frame.send(frame).await.map_err(|e| {
-                        super::super::error::Error::ChannelErrorSender(
-                            super::super::error::ChannelSendError::General(e.to_string()),
-                        )
-                    })
-                );
+                    let frame: EitherFrame = frame.into();
+                    handle_result!(
+                        tx_status,
+                        tx_frame.send(frame).await.map_err(|e| {
+                            super::super::error::Error::ChannelErrorSender(
+                                super::super::error::ChannelSendError::General(e.to_string()),
+                            )
+                        })
+                    );
+                }
+            });
+            tokio::select! {
+                _ = task => {},
+                _ = cancellation_token.cancelled() => {},
             }
         });
+
         Ok(())
     }
 

@@ -21,6 +21,7 @@ use std::{
 };
 
 use tokio::{sync::broadcast, task, time::Duration};
+use tokio_util::sync::CancellationToken;
 use v1::server_to_client;
 
 use crate::status::{State, Status};
@@ -75,6 +76,7 @@ async fn main() {
         broadcast::Receiver<server_to_client::Notify>,
     ) = broadcast::channel(10);
 
+    let cancellation_token = CancellationToken::new();
     start(
         rx_sv2_submit_shares_ext.clone(),
         tx_sv2_submit_shares_ext.clone(),
@@ -89,6 +91,7 @@ async fn main() {
         tx_sv1_notify.clone(),
         target.clone(),
         tx_status.clone(),
+        cancellation_token.clone(),
     )
     .await;
 
@@ -148,6 +151,7 @@ async fn main() {
                     tx_sv1_notify.clone(),
                     target.clone(),
                     tx_status.clone(),
+                    cancellation_token.clone(),
                 )
                 .await;
             }
@@ -173,6 +177,7 @@ async fn start<'a>(
     tx_sv1_notify: broadcast::Sender<server_to_client::Notify<'static>>,
     target: Arc<Mutex<Vec<u8>>>,
     tx_status: async_channel::Sender<Status<'static>>,
+    cancellation_token: CancellationToken,
 ) {
     let proxy_config = match process_cli_args() {
         Ok(p) => p,
@@ -187,6 +192,7 @@ async fn start<'a>(
     );
 
     let diff_config = Arc::new(Mutex::new(proxy_config.upstream_difficulty_config.clone()));
+    let cancellation_token_upstream = cancellation_token.clone();
     // Instantiate a new `Upstream` (SV2 Pool)
     let upstream = match upstream_sv2::Upstream::new(
         upstream_addr,
@@ -199,6 +205,7 @@ async fn start<'a>(
         status::Sender::Upstream(tx_status.clone()),
         target.clone(),
         diff_config.clone(),
+        cancellation_token_upstream,
     )
     .await
     {
@@ -212,7 +219,7 @@ async fn start<'a>(
     // can listen for signals and failures on the status channel. This
     // allows for the tproxy to fail gracefully if any of these init tasks
     //fail
-    task::spawn(async move {
+    let task = task::spawn(async move {
         // Connect to the SV2 Upstream role
         match upstream_sv2::Upstream::connect(
             upstream.clone(),
@@ -283,4 +290,8 @@ async fn start<'a>(
             diff_config,
         );
     }); // End of init task
+    tokio::select! {
+        _ = task => {},
+        _ = cancellation_token.cancelled() => {},
+    }
 }
