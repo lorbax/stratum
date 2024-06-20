@@ -297,8 +297,10 @@ impl Upstream {
                     }
                 });
                 tokio::select! {
-                    _ = task => {},
-                    _ = token1.cancelled() => {},
+                    _ = token1.cancelled() => {
+                        task.cancel();
+                        println!("Shutting down handle result task");
+                    },
                 }
             });
         }
@@ -456,8 +458,10 @@ impl Upstream {
                 }
             });
             tokio::select! {
-                _ = task => {},
-                _ = token2.cancelled() => {},
+                _ = token2.cancelled() => {
+                    task.cancel();
+                    println!("Shutting down parse incoming task");
+                },
             }
         });
 
@@ -536,8 +540,10 @@ impl Upstream {
                 }
             });
             tokio::select! {
-                _ = task => {},
-                _ = cancellation_token.cancelled() => {},
+                _ = cancellation_token.cancelled() => {
+                    task.cancel();
+                    println!("Shutting down handle submit task");
+                },
             }
         });
 

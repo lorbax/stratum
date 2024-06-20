@@ -130,8 +130,13 @@ async fn main() {
             }
             State::UpstreamShutdown(err) => {
                 error!("SHUTDOWN from: {}", err);
+                cancellation_token.clone().cancel();
+                if cancellation_token.is_cancelled() {
+                    println!("Cancelling");
+                };
                 // wait a random amount of time between 0 and 3000ms
                 // if all the downstreams try to reconnect at the same time, the upstream may fail
+                tokio::time::sleep(Duration::from_millis(10000)).await;
                 let mut rng = rand::thread_rng();
                 let wait_time = rng.gen_range(0..=3000);
                 tokio::time::sleep(Duration::from_millis(wait_time)).await;
@@ -215,6 +220,7 @@ async fn start<'a>(
             return;
         }
     };
+    let cancellation_token_init_task = cancellation_token.clone();
     // Spawn a task to do all of this init work so that the main thread
     // can listen for signals and failures on the status channel. This
     // allows for the tproxy to fail gracefully if any of these init tasks
@@ -259,6 +265,7 @@ async fn start<'a>(
             async_std::task::sleep(std::time::Duration::from_millis(100)).await;
         }
 
+        let cancellation_token_bridge = cancellation_token_init_task.clone();
         // Instantiate a new `Bridge` and begins handling incoming messages
         let b = proxy::Bridge::new(
             rx_sv1_downstream,
@@ -270,6 +277,7 @@ async fn start<'a>(
             extended_extranonce,
             target,
             up_id,
+            cancellation_token_bridge,
         );
         proxy::Bridge::start(b.clone());
 
@@ -279,6 +287,7 @@ async fn start<'a>(
             proxy_config.downstream_port,
         );
 
+        let cancellation_token_downstream = cancellation_token_init_task.clone();
         // Accept connections from one or more SV1 Downstream roles (SV1 Mining Devices)
         downstream_sv1::Downstream::accept_connections(
             downstream_addr,
@@ -288,10 +297,13 @@ async fn start<'a>(
             b,
             proxy_config.downstream_difficulty_config,
             diff_config,
+            cancellation_token_downstream,
         );
     }); // End of init task
     tokio::select! {
         _ = task => {},
-        _ = cancellation_token.cancelled() => {},
+        _ = cancellation_token.cancelled() => {
+            println!("Shutting init task");
+        },
     }
 }
