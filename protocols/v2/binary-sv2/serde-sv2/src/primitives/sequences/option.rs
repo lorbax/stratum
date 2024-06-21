@@ -4,6 +4,7 @@ use super::{
 };
 use crate::primitives::{FixedSize, GetSize};
 use alloc::vec::Vec;
+use debug_assert;
 use serde::{
     ser::{self, SerializeSeq, SerializeTuple},
     Deserialize, Deserializer, Serialize,
@@ -69,7 +70,7 @@ impl<'s, T: Clone + Serialize + TryFromBSlice<'s>> Serialize for Sv2Option<'s, T
             }
             (None, Some(data)) => {
                 if serializer.is_human_readable() {
-                    let data_ = self.data.clone().unwrap();
+                    let data_ = data.clone();
                     let mut seq = serializer.serialize_seq(Some(data_.len()))?;
                     for item in data_ {
                         seq.serialize_element(&item)?;
@@ -83,7 +84,13 @@ impl<'s, T: Clone + Serialize + TryFromBSlice<'s>> Serialize for Sv2Option<'s, T
                     seq.end()
                 }
             }
-            _ => panic!(),
+            _ => {
+                debug_assert!(
+                    false,
+                    "sv2option can never have boh fields of the same type"
+                );
+                panic!()
+            }
         }
     }
 }
@@ -231,22 +238,29 @@ impl<'a, T: Clone + FixedSize + Serialize + TryFromBSlice<'a>> GetSize for Sv2Op
 }
 impl<'s> Sv2Option<'s, U256<'s>> {
     pub fn into_static(self) -> Sv2Option<'static, U256<'static>> {
-        if let Some(inner) = self.data {
-            let inner = inner.clone();
-            let data = inner.into_iter().map(|i| i.into_static()).collect();
-            Sv2Option {
-                seq: None,
-                data: Some(data),
+        match (self.data, self.seq) {
+            (None, Some(seq)) => {
+                let data = seq.parse().unwrap();
+                let data = data.into_iter().map(|i| i.into_static()).collect();
+                Sv2Option {
+                    seq: None,
+                    data: Some(data),
+                }
             }
-        } else {
-            // this is an already valid seq should be safe to call the unwraps.
-            // also this library shouldn't be used for priduction envs so is ok do thigs like this
-            // one
-            let data = self.seq.unwrap().parse().unwrap();
-            let data = data.into_iter().map(|i| i.into_static()).collect();
-            Sv2Option {
-                seq: None,
-                data: Some(data),
+            (Some(inner), None) => {
+                let inner = inner.clone();
+                let data = inner.into_iter().map(|i| i.into_static()).collect();
+                Sv2Option {
+                    seq: None,
+                    data: Some(data),
+                }
+            }
+            _ => {
+                debug_assert!(
+                    false,
+                    "sv2option can never have boh fields of the same type"
+                );
+                panic!()
             }
         }
     }
