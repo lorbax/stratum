@@ -36,10 +36,9 @@ use roles_logic_sv2::{
 use std::{
     net::SocketAddr,
     sync::{atomic::AtomicBool, Arc},
-    thread::sleep,
-    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
+use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 
 use stratum_common::bitcoin::BlockHash;
@@ -138,7 +137,7 @@ impl Upstream {
                         address, e
                     );
 
-                    sleep(Duration::from_secs(5));
+                    sleep(Duration::from_secs(5)).await;
                 }
             }
         };
@@ -288,25 +287,25 @@ impl Upstream {
         {
             let self_ = self_.clone();
             let tx_status = tx_status.clone();
-            task::spawn(async move {
-                let task = task::spawn(async move {
+            tokio::task::spawn(async move {
+                let task = tokio::task::spawn(async move {
                     // No need to start diff management immediatly
-                    async_std::task::sleep(Duration::from_secs(10)).await;
+                    sleep(Duration::from_secs(10)).await;
                     loop {
                         handle_result!(tx_status, Self::try_update_hashrate(self_.clone()).await);
                     }
                 });
                 tokio::select! {
                     _ = token1.cancelled() => {
-                        task.cancel();
+                        task.abort();
                         println!("Shutting down handle result task");
                     },
                 }
             });
         }
 
-        task::spawn(async move {
-            let task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let task = tokio::task::spawn(async move {
                 loop {
                     // Waiting to receive a message from the SV2 Upstream role
                     let incoming = handle_result!(tx_status, recv.recv().await);
@@ -459,7 +458,7 @@ impl Upstream {
             });
             tokio::select! {
                 _ = token2.cancelled() => {
-                    task.cancel();
+                    task.abort();
                     println!("Shutting down parse incoming task");
                 },
             }
@@ -501,8 +500,8 @@ impl Upstream {
                 )
             })
             .map_err(|_| PoisonLock)?;
-        task::spawn(async move {
-            let task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let task = tokio::task::spawn(async move {
                 loop {
                     let mut sv2_submit: SubmitSharesExtended =
                         handle_result!(tx_status, receiver.recv().await);
@@ -541,7 +540,7 @@ impl Upstream {
             });
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
-                    task.cancel();
+                    task.abort();
                     println!("Shutting down handle submit task");
                 },
             }

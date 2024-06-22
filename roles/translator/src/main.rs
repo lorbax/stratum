@@ -136,10 +136,11 @@ async fn main() {
                 };
                 // wait a random amount of time between 0 and 3000ms
                 // if all the downstreams try to reconnect at the same time, the upstream may fail
-                tokio::time::sleep(Duration::from_millis(10000)).await;
+                tokio::time::sleep(Duration::from_millis(1000)).await;
                 let mut rng = rand::thread_rng();
                 let wait_time = rng.gen_range(0..=3000);
                 tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                let cancellation_token = CancellationToken::new();
 
                 error!("Trying recconnecting to upstream");
                 start(

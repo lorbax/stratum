@@ -149,12 +149,12 @@ impl Downstream {
         let tx_shutdown_clone = tx_shutdown.clone();
         let tx_status_reader = tx_status.clone();
         let cancellation_token_mining_device = cancellation_token.clone();
-        task::spawn(async move {
+        tokio::task::spawn(async move {
             // Task to read from SV1 Mining Device Client socket via `socket_reader`. Depending on the
             // SV1 message received, a message response is sent directly back to the SV1 Downstream
             // role, or the message is sent upwards to the Bridge for translation into a SV2 message
             // and then sent to the SV2 Upstream role.
-            let socket_reader_task = task::spawn(async move {
+            let socket_reader_task = tokio::task::spawn(async move {
                 let reader = BufReader::new(&*socket_reader);
                 let mut messages = FramedRead::new(
                     async_compat::Compat::new(reader),
@@ -207,7 +207,7 @@ impl Downstream {
             });
             tokio::select! {
                 _ = cancellation_token_mining_device.cancelled() => {
-                    socket_reader_task.cancel();
+                    socket_reader_task.abort();
                     println!("Shutting down sv1 downstream reader");
                 },
             }
@@ -219,10 +219,10 @@ impl Downstream {
         let host_ = host.clone();
 
         let cancellation_token_new_sv1_message_no_transl = cancellation_token.clone();
-        task::spawn(async move {
+        tokio::task::spawn(async move {
             // Task to receive SV1 message responses to SV1 messages that do NOT need translation.
             // These response messages are sent directly to the SV1 Downstream role.
-            let socket_writer_task = task::spawn(async move {
+            let socket_writer_task = tokio::task::spawn(async move {
                 loop {
                     select! {
                         res = receiver_outgoing.recv().fuse() => {
@@ -253,7 +253,7 @@ impl Downstream {
             });
             tokio::select! {
                 _ = cancellation_token_new_sv1_message_no_transl.cancelled() => {
-                    socket_writer_task.cancel();
+                    socket_writer_task.abort();
                     println!("Shutting down sv1 downstream writer");
                 },
             }
@@ -263,8 +263,8 @@ impl Downstream {
         let self_ = downstream.clone();
 
         let cancellation_token_notify_task = cancellation_token.clone();
-        task::spawn(async move {
-            let notify_task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let notify_task = tokio::task::spawn(async move {
                 let timeout_timer = std::time::Instant::now();
                 let mut first_sent = false;
                 loop {
@@ -342,7 +342,7 @@ impl Downstream {
             });
             tokio::select! {
                 _ = cancellation_token_notify_task.cancelled() => {
-                    notify_task.cancel();
+                    notify_task.abort();
                     println!("Shutting down sv1 downstream job notifier");
                 },
             }
@@ -364,8 +364,8 @@ impl Downstream {
     ) {
         let cancellation_token_downstream = cancellation_token.clone();
 
-        task::spawn(async move {
-            let task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let task = tokio::task::spawn(async move {
                 let downstream_listener = TcpListener::bind(downstream_addr).await.unwrap();
                 let mut downstream_incoming = downstream_listener.incoming();
 
@@ -408,7 +408,7 @@ impl Downstream {
             });
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
-                    task.cancel();
+                    task.abort();
                     println!("Shutting down accept connections task");
                 },
             };

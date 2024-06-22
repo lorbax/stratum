@@ -171,8 +171,8 @@ impl Bridge {
         let (rx_sv1_downstream, tx_status) = self_
             .safe_lock(|s| (s.rx_sv1_downstream.clone(), s.tx_status.clone()))
             .unwrap();
-        task::spawn(async move {
-            let task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let task = tokio::task::spawn(async move {
                 loop {
                     let msg = handle_result!(tx_status, rx_sv1_downstream.clone().recv().await);
 
@@ -194,7 +194,7 @@ impl Bridge {
             });
             tokio::select! {
                 _ = cancellation_token_handle_downstream.cancelled() => {
-                    task.cancel();
+                    task.abort();
                     println!("Shutting down handle_result task");
                 },
             }
@@ -393,8 +393,8 @@ impl Bridge {
             })
             .unwrap();
         debug!("Starting handle_new_prev_hash task");
-        task::spawn(async move {
-            let task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let task = tokio::task::spawn(async move {
                 loop {
                     // Receive `SetNewPrevHash` from `Upstream`
                     let sv2_set_new_prev_hash: SetNewPrevHash =
@@ -416,7 +416,7 @@ impl Bridge {
             });
             tokio::select! {
                 _ = cancellation_token_handle_prev_hash.cancelled() => {
-                    task.cancel();
+                    task.abort();
                     println!("handle_new_prev_hash cancelled");
                 }
             }
@@ -496,8 +496,8 @@ impl Bridge {
             })
             .unwrap();
         debug!("Starting handle_new_extended_mining_job task");
-        task::spawn(async move {
-            let task = task::spawn(async move {
+        tokio::task::spawn(async move {
+            let task = tokio::task::spawn(async move {
                 loop {
                     // Receive `NewExtendedMiningJob` from `Upstream`
                     let sv2_new_extended_mining_job: NewExtendedMiningJob = handle_result!(
@@ -523,7 +523,7 @@ impl Bridge {
             });
             tokio::select! {
                 _ = cancellation_token_new_extended_mining_job.cancelled() => {
-                    task.cancel();
+                    task.abort();
                     println!("Task handle_new_extended_mining_job cancelled");
                 }
             }
