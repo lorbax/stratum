@@ -99,6 +99,8 @@ pub enum Error {
     NoValidTemplate(String),
     /// Invalid extranonce size. Params: (required min, requested)
     InvalidExtranonceSize(u16, u16),
+    /// Extranonce prefix is already assigned to an active extended channel.
+    ExtranoncePrefixAlreadyInUse,
     /// Poison Lock
     PoisonLock(String),
     /// Invalid BIP34 bytes
@@ -185,6 +187,7 @@ impl Display for Error {
                     required_min, requested
                 )
             },
+            ExtranoncePrefixAlreadyInUse => write!(f, "Extranonce prefix already in use"),
             NoMoreExtranonces => write!(f, "No more extranonces"),
             JobIsNotFutureButPrevHashNotPresent => write!(f, "A non future job always expect a previous new prev hash"),
             ChannelIsNeitherExtendedNeitherInAPool => write!(f, "If a channel is neither extended neither is part of a pool the only thing to do when a OpenStandardChannel is received is to relay it upstream with and updated request id"),

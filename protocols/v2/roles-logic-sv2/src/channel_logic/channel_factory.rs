@@ -368,13 +368,20 @@ impl ChannelFactory {
                     return Err(e);
                 }
             };
-            let extranonce = self
-                .extranonces
-                .next_extended(max_extranonce_size as usize)
-                .unwrap();
-            let extranonce_with_stripped_data = extranonce
-                .into_prefix(self.extranonces.get_prefix_len(), &[])
-                .unwrap();
+            let (extranonce, extranonce_with_stripped_data) = loop {
+                let extranonce = self
+                    .extranonces
+                    .next_extended(max_extranonce_size as usize)
+                    .ok_or(Error::ExtranonceSpaceEnded)?;
+                let extranonce_with_stripped_data = extranonce
+                    .into_prefix(self.extranonces.get_prefix_len(), &[])
+                    .unwrap();
+                if !self.has_extended_channel_extranonce_prefix(
+                    extranonce_with_stripped_data.inner_as_ref(),
+                ) {
+                    break (extranonce, extranonce_with_stripped_data);
+                }
+            };
             let success_with_stirpped_extranonce_add_data = OpenExtendedMiningChannelSuccess {
                 request_id,
                 channel_id,
@@ -398,23 +405,7 @@ impl ChannelFactory {
                 extranonce_prefix,
             };
             let mut result = vec![Mining::OpenExtendedMiningChannelSuccess(success)];
-            if let Some((job, _)) = &self.get_last_valid_job() {
-                let mut job = job.clone();
-                job.set_future();
-                let j_id = job.job_id;
-                result.push(Mining::NewExtendedMiningJob(job));
-                if let Some((new_prev_hash, _)) = &self.last_prev_hash {
-                    let mut new_prev_hash = new_prev_hash.into_set_p_hash(channel_id, None);
-                    new_prev_hash.job_id = j_id;
-                    result.push(Mining::SetNewPrevHash(new_prev_hash.clone()))
-                };
-            } else if let Some((new_prev_hash, _)) = &self.last_prev_hash {
-                let new_prev_hash = new_prev_hash.into_set_p_hash(channel_id, None);
-                result.push(Mining::SetNewPrevHash(new_prev_hash.clone()))
-            };
-            for (job, _) in &self.future_jobs {
-                result.push(Mining::NewExtendedMiningJob(job.clone()))
-            }
+            self.prepare_extended_jobs_and_p_hash(&mut result, channel_id);
             Ok((result, Some(channel_id)))
         } else {
             Ok((
@@ -423,6 +414,35 @@ impl ChannelFactory {
                 )],
                 None,
             ))
+        }
+    }
+
+    fn has_extended_channel_extranonce_prefix(&self, extranonce_prefix: &[u8]) -> bool {
+        self.extended_channels
+            .values()
+            .any(|channel| channel.extranonce_prefix.inner_as_ref() == extranonce_prefix)
+    }
+
+    fn prepare_extended_jobs_and_p_hash(&self, result: &mut Vec<Mining<'static>>, channel_id: u32) {
+        if let Some((job, _)) = &self.get_last_valid_job() {
+            let mut job = job.clone();
+            job.channel_id = channel_id;
+            job.set_future();
+            let j_id = job.job_id;
+            result.push(Mining::NewExtendedMiningJob(job));
+            if let Some((new_prev_hash, _)) = &self.last_prev_hash {
+                let mut new_prev_hash = new_prev_hash.into_set_p_hash(channel_id, None);
+                new_prev_hash.job_id = j_id;
+                result.push(Mining::SetNewPrevHash(new_prev_hash.clone()))
+            };
+        } else if let Some((new_prev_hash, _)) = &self.last_prev_hash {
+            let new_prev_hash = new_prev_hash.into_set_p_hash(channel_id, None);
+            result.push(Mining::SetNewPrevHash(new_prev_hash.clone()))
+        };
+        for (job, _) in &self.future_jobs {
+            let mut job = job.clone();
+            job.channel_id = channel_id;
+            result.push(Mining::NewExtendedMiningJob(job))
         }
     }
 
@@ -436,6 +456,17 @@ impl ChannelFactory {
         channel_id: u32,
         extranonce_size: u16,
     ) -> Option<()> {
+        self.replicate_extended_channel(target, extranonce, channel_id, extranonce_size);
+        Some(())
+    }
+
+    fn replicate_extended_channel(
+        &mut self,
+        target: binary_sv2::U256<'static>,
+        extranonce: mining_sv2::Extranonce,
+        channel_id: u32,
+        extranonce_size: u16,
+    ) {
         self.channel_to_group_id.insert(channel_id, 0);
         let extranonce_prefix = extranonce.into();
         let success = OpenExtendedMiningChannelSuccess {
@@ -445,9 +476,9 @@ impl ChannelFactory {
             extranonce_size,
             extranonce_prefix,
         };
-        self.extended_channels.insert(channel_id, success.clone());
-        Some(())
+        self.extended_channels.insert(channel_id, success);
     }
+
     /// Called when an `OpenStandardChannel` message is received for a header only mining channel.
     /// Here we save the downstream's target (based on hashrate) and and the
     /// channel's extranonce details before returning the relevant SV2 mining messages
@@ -1297,6 +1328,14 @@ impl PoolChannelFactory {
     /// Called when we want to replicate a channel already opened by another actor.
     /// is used only in the jd client from the template provider module to mock a pool.
     /// Anything else should open channel with the new_extended_channel function
+    ///
+    /// This does not register the replicated channel's extranonce in the `ExtendedExtranonce`
+    /// allocator, so the factory can still allocate overlapping extranonce space later.
+    /// SAFETY It is safe only when all of the following are true:
+    /// - the factory is used only as a JD mock pool for share validation;
+    /// - no standard or extended channels are opened from this factory after replication;
+    /// - the channel id and extranonce come from a channel already opened by the trusted upstream;
+    /// - no pool additional coinbase script data is configured.
     pub fn replicate_upstream_extended_channel_only_jd(
         &mut self,
         target: binary_sv2::U256<'static>,
@@ -1317,6 +1356,74 @@ impl PoolChannelFactory {
             channel_id,
             extranonce_size,
         )
+    }
+
+    /// Called when a pool wants to restore an already-known extended channel prefix.
+    ///
+    /// The provided `extranonce_prefix` must not include the pool's additional coinbase script
+    /// data. That data is stored separately and prepended only when constructing the coinbase.
+    /// this function can be used also from downstream, but the additional_coinbase_script_data
+    /// should be empty (that field non empty only if the pool has to restore a channel, with a
+    /// pool signature already assigned in a previous session)
+    pub fn replicate_pool_extended_channel(
+        &mut self,
+        request_id: u32,
+        target: binary_sv2::U256<'static>,
+        extranonce_prefix: mining_sv2::Extranonce,
+        channel_id: u32,
+        extranonce_size: u16,
+        additional_coinbase_script_data: Vec<u8>,
+    ) -> Result<Vec<Mining<'static>>, Error> {
+        if self.additional_coinbase_script_data.len() != additional_coinbase_script_data.len() {
+            return Err(Error::NewAdditionalCoinbaseDataLenDoNotMatch);
+        }
+
+        let expected_prefix_len = self.inner.extranonces.get_prefix_len();
+        let actual_prefix_len = extranonce_prefix.as_ref().len();
+        if actual_prefix_len != expected_prefix_len {
+            return Err(Error::InvalidExtranonceSize(
+                expected_prefix_len as u16,
+                actual_prefix_len.try_into().unwrap_or(u16::MAX),
+            ));
+        }
+
+        let expected_extranonce_size = self.inner.extranonces.get_range2_len();
+        if extranonce_size as usize != expected_extranonce_size {
+            return Err(Error::InvalidExtranonceSize(
+                expected_extranonce_size as u16,
+                extranonce_size,
+            ));
+        }
+
+        if self
+            .inner
+            .has_extended_channel_extranonce_prefix(extranonce_prefix.as_ref())
+        {
+            return Err(Error::ExtranoncePrefixAlreadyInUse);
+        }
+
+        let downstream_extranonce_prefix = extranonce_prefix
+            .into_prefix(expected_prefix_len, &additional_coinbase_script_data)
+            .unwrap();
+        self.channel_to_additional_coinbase_script_data
+            .insert(channel_id, (additional_coinbase_script_data, None));
+        self.inner.replicate_extended_channel(
+            target.clone(),
+            extranonce_prefix,
+            channel_id,
+            extranonce_size,
+        );
+        let success = OpenExtendedMiningChannelSuccess {
+            request_id,
+            channel_id,
+            target,
+            extranonce_size,
+            extranonce_prefix: downstream_extranonce_prefix,
+        };
+        let mut result = vec![Mining::OpenExtendedMiningChannelSuccess(success)];
+        self.inner
+            .prepare_extended_jobs_and_p_hash(&mut result, channel_id);
+        Ok(result)
     }
 
     /// Called only when a new prev hash is received by a Template Provider. It matches the
@@ -2387,6 +2494,58 @@ mod test {
             .collect()
     }
 
+    fn pool_channel_factory(
+        additional_coinbase_script_data: Vec<u8>,
+        extranonces: ExtendedExtranonce,
+    ) -> PoolChannelFactory {
+        let out = TxOut {
+            value: Amount::from_sat(BLOCK_REWARD),
+            script_pubkey: decode_hex(COINBASE_OUTPUT).unwrap().into(),
+        };
+        let extranonce_len = extranonces.get_len() as u8;
+        PoolChannelFactory::new(
+            Arc::new(Mutex::new(GroupId::new())),
+            extranonces,
+            JobsCreators::new(extranonce_len),
+            1.0,
+            ExtendedChannelKind::Pool,
+            vec![out],
+            additional_coinbase_script_data,
+        )
+        .unwrap()
+    }
+
+    fn new_template(template_id: u64) -> NewTemplate<'static> {
+        let (prefix, _, _) = get_coinbase();
+
+        NewTemplate {
+            template_id,
+            future_template: true,
+            version: VERSION,
+            coinbase_tx_version: 1,
+            coinbase_prefix: prefix.try_into().unwrap(),
+            coinbase_tx_input_sequence: u32::MAX,
+            coinbase_tx_value_remaining: 5_000_000_000,
+            coinbase_tx_outputs_count: 0,
+            coinbase_tx_outputs: get_coinbase_outputs(),
+            coinbase_tx_locktime: 0,
+            merkle_path: get_merkle_path(),
+        }
+    }
+
+    fn new_prev_hash(template_id: u64) -> SetNewPrevHashFromTp<'static> {
+        let mut p_hash = decode_hex(PREV_HASH).unwrap();
+        p_hash.reverse();
+
+        SetNewPrevHashFromTp {
+            template_id,
+            prev_hash: p_hash.try_into().unwrap(),
+            header_timestamp: PREV_HEADER_TIMESTAMP,
+            n_bits: PREV_HEADER_NBITS,
+            target: nbit_to_target(PREV_HEADER_NBITS),
+        }
+    }
+
     fn custom_job_with_prefix(
         channel_id: u32,
         coinbase_prefix: Vec<u8>,
@@ -2423,6 +2582,241 @@ mod test {
             version: VERSION,
             extranonce: vec![0; 8].try_into().unwrap(),
         }
+    }
+
+    #[test]
+    fn replicate_pool_extended_channel_registers_prefix_and_additional_data() {
+        let additional_coinbase_script_data = vec![1, 2, 3, 4, 5, 6];
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel =
+            pool_channel_factory(additional_coinbase_script_data.clone(), extranonces);
+        let extranonce_prefix = vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+        let target = vec![255; 32].try_into().unwrap();
+        let channel_id = 42;
+
+        let result = channel
+            .replicate_pool_extended_channel(
+                7,
+                target,
+                extranonce_prefix.clone().try_into().unwrap(),
+                channel_id,
+                6,
+                additional_coinbase_script_data.clone(),
+            )
+            .unwrap();
+
+        let success = match &result[0] {
+            Mining::OpenExtendedMiningChannelSuccess(success) => success,
+            _ => panic!(),
+        };
+        let mut downstream_extranonce_prefix = additional_coinbase_script_data.clone();
+        downstream_extranonce_prefix.extend(extranonce_prefix.clone());
+
+        assert_eq!(success.request_id, 7);
+        assert_eq!(success.channel_id, channel_id);
+        assert_eq!(success.extranonce_size, 6);
+        assert_eq!(
+            success.extranonce_prefix.clone().to_vec(),
+            downstream_extranonce_prefix
+        );
+        assert!(channel.get_extended_channels_ids().contains(&channel_id));
+        assert_eq!(
+            channel.get_extranonce_prefix(channel_id).unwrap(),
+            extranonce_prefix
+        );
+        assert_eq!(
+            channel
+                .get_additional_coinbase_script_data(channel_id, 1)
+                .unwrap(),
+            additional_coinbase_script_data
+        );
+    }
+
+    #[test]
+    fn replicate_pool_extended_channel_returns_current_job_and_prev_hash() {
+        let additional_coinbase_script_data = vec![1, 2, 3, 4, 5, 6];
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel =
+            pool_channel_factory(additional_coinbase_script_data.clone(), extranonces);
+        let template_id = 10;
+        let mut template = new_template(template_id);
+        channel.on_new_template(&mut template).unwrap();
+        let prev_hash_from_tp = new_prev_hash(template_id);
+        let current_job_id = channel
+            .on_new_prev_hash_from_tp(&prev_hash_from_tp)
+            .unwrap();
+
+        let target = vec![255; 32].try_into().unwrap();
+        let channel_id = 42;
+        let result = channel
+            .replicate_pool_extended_channel(
+                7,
+                target,
+                vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+                    .try_into()
+                    .unwrap(),
+                channel_id,
+                6,
+                additional_coinbase_script_data,
+            )
+            .unwrap();
+
+        assert_eq!(result.len(), 3);
+        let success = match &result[0] {
+            Mining::OpenExtendedMiningChannelSuccess(success) => success,
+            _ => panic!(),
+        };
+        let job = match &result[1] {
+            Mining::NewExtendedMiningJob(job) => job,
+            _ => panic!(),
+        };
+        let prev_hash = match &result[2] {
+            Mining::SetNewPrevHash(prev_hash) => prev_hash,
+            _ => panic!(),
+        };
+
+        assert_eq!(success.request_id, 7);
+        assert_eq!(success.channel_id, channel_id);
+        assert_eq!(job.channel_id, channel_id);
+        assert_eq!(job.job_id, current_job_id);
+        assert!(job.is_future());
+        assert_eq!(prev_hash.channel_id, channel_id);
+        assert_eq!(prev_hash.job_id, job.job_id);
+        assert_eq!(prev_hash.min_ntime, PREV_HEADER_TIMESTAMP);
+        assert_eq!(prev_hash.nbits, PREV_HEADER_NBITS);
+    }
+
+    #[test]
+    fn replicate_pool_extended_channel_rejects_duplicate_prefix() {
+        let additional_coinbase_script_data = vec![1, 2, 3, 4, 5, 6];
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel =
+            pool_channel_factory(additional_coinbase_script_data.clone(), extranonces);
+        let extranonce_prefix = vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+
+        channel
+            .replicate_pool_extended_channel(
+                7,
+                vec![255; 32].try_into().unwrap(),
+                extranonce_prefix.clone().try_into().unwrap(),
+                42,
+                6,
+                additional_coinbase_script_data.clone(),
+            )
+            .unwrap();
+
+        let result = channel.replicate_pool_extended_channel(
+            8,
+            vec![255; 32].try_into().unwrap(),
+            extranonce_prefix.try_into().unwrap(),
+            43,
+            6,
+            additional_coinbase_script_data,
+        );
+
+        assert!(matches!(result, Err(Error::ExtranoncePrefixAlreadyInUse)));
+        assert!(channel.get_extranonce_prefix(43).is_none());
+    }
+
+    #[test]
+    fn new_extended_channel_skips_restored_prefix() {
+        let additional_coinbase_script_data = vec![1, 2, 3, 4, 5, 6];
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel =
+            pool_channel_factory(additional_coinbase_script_data.clone(), extranonces);
+        let restored_prefix = vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+
+        channel
+            .replicate_pool_extended_channel(
+                7,
+                vec![255; 32].try_into().unwrap(),
+                restored_prefix.clone().try_into().unwrap(),
+                42,
+                6,
+                additional_coinbase_script_data,
+            )
+            .unwrap();
+
+        let result = channel
+            .new_extended_channel(8, 100_000_000_000_000.0, 6)
+            .unwrap();
+        let fresh_channel_id = match &result[0] {
+            Mining::OpenExtendedMiningChannelSuccess(success) => success.channel_id,
+            _ => panic!(),
+        };
+
+        assert_eq!(channel.get_extranonce_prefix(42).unwrap(), restored_prefix);
+        assert_eq!(
+            channel.get_extranonce_prefix(fresh_channel_id).unwrap(),
+            vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 2]
+        );
+    }
+
+    #[test]
+    fn replicate_pool_extended_channel_rejects_additional_data_len_mismatch() {
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel = pool_channel_factory(vec![1, 2, 3, 4, 5, 6], extranonces);
+        let target = vec![255; 32].try_into().unwrap();
+        let channel_id = 42;
+
+        let result = channel.replicate_pool_extended_channel(
+            7,
+            target,
+            vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+                .try_into()
+                .unwrap(),
+            channel_id,
+            6,
+            vec![1, 2, 3, 4, 5],
+        );
+
+        assert!(matches!(
+            result,
+            Err(Error::NewAdditionalCoinbaseDataLenDoNotMatch)
+        ));
+        assert!(channel.get_extranonce_prefix(channel_id).is_none());
+    }
+
+    #[test]
+    fn replicate_pool_extended_channel_rejects_prefix_len_mismatch() {
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel = pool_channel_factory(vec![1, 2, 3, 4, 5, 6], extranonces);
+        let target = vec![255; 32].try_into().unwrap();
+        let channel_id = 42;
+
+        let result = channel.replicate_pool_extended_channel(
+            7,
+            target,
+            vec![10, 11, 12, 13, 14, 15, 16, 17, 18].try_into().unwrap(),
+            channel_id,
+            6,
+            vec![1, 2, 3, 4, 5, 6],
+        );
+
+        assert!(matches!(result, Err(Error::InvalidExtranonceSize(10, 9))));
+        assert!(channel.get_extranonce_prefix(channel_id).is_none());
+    }
+
+    #[test]
+    fn replicate_pool_extended_channel_rejects_extranonce_size_mismatch() {
+        let extranonces = ExtendedExtranonce::new(0..0, 0..10, 10..16);
+        let mut channel = pool_channel_factory(vec![1, 2, 3, 4, 5, 6], extranonces);
+        let target = vec![255; 32].try_into().unwrap();
+        let channel_id = 42;
+
+        let result = channel.replicate_pool_extended_channel(
+            7,
+            target,
+            vec![10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+                .try_into()
+                .unwrap(),
+            channel_id,
+            5,
+            vec![1, 2, 3, 4, 5, 6],
+        );
+
+        assert!(matches!(result, Err(Error::InvalidExtranonceSize(6, 5))));
+        assert!(channel.get_extranonce_prefix(channel_id).is_none());
     }
 
     #[test]
