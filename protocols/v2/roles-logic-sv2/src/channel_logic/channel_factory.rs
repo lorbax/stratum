@@ -1370,16 +1370,16 @@ impl PoolChannelFactory {
         ),
         Error,
     > {
+        if !m.future_template && self.inner.last_prev_hash.is_none() {
+            return Err(Error::JobIsNotFutureButPrevHashNotPresent);
+        }
+
         let new_job = self.job_creator.on_new_template(
             m,
             true,
             self.pool_coinbase_outputs.clone(),
             self.additional_coinbase_script_data.len() as u8,
         )?;
-        if !new_job.is_future() && self.inner.last_prev_hash.is_none() {
-            return Err(Error::JobIsNotFutureButPrevHashNotPresent);
-        }
-
         let extended_channel_ids = self.inner.extended_channels.keys().copied().collect();
         let mut standard_messages = HashMap::with_hasher(BuildNoHashHasher::default());
         self.inner
@@ -2703,7 +2703,7 @@ mod test {
     }
 
     #[test]
-    fn extended_fanout_rejects_non_future_template_without_prevhash_before_job_preparation() {
+    fn extended_fanout_rejects_non_future_template_without_mutating_job_creator() {
         let (prefix, _, _) = get_coinbase();
         let out = TxOut {value: Amount::from_sat(BLOCK_REWARD), script_pubkey: decode_hex("4104c6d0969c2d98a5c19ba7c36c7937c5edbd60ff2a01397c4afe54f16cd641667ea0049ba6f9e1796ba3c8e49e1b504c532ebbaaa1010c3f7d9b83a8ea7fd800e2ac").unwrap().into()};
         let creator = JobsCreators::new(7);
@@ -2757,6 +2757,7 @@ mod test {
             channel.on_new_template_for_extended_fanout(&mut new_template),
             Err(Error::JobIsNotFutureButPrevHashNotPresent)
         ));
+        assert!(channel.job_creator.get_template_id_from_job(1).is_none());
         assert_eq!(channel.inner.job_ids, job_ids_before);
     }
 
