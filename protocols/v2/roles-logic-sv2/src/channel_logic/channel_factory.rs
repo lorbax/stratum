@@ -875,6 +875,21 @@ impl ChannelFactory {
         m: &NewExtendedMiningJob<'static>,
         additional_coinbase_script_data: Option<&[u8]>,
     ) -> Result<(), Error> {
+        self.prepare_standard_jobs_for_downstream_on_new_extended(
+            result,
+            m,
+            additional_coinbase_script_data,
+        )?;
+        self.prepare_extended_jobs_for_downstream_on_new_extended(result, m);
+        Ok(())
+    }
+
+    fn prepare_standard_jobs_for_downstream_on_new_extended(
+        &mut self,
+        result: &mut HashMap<u32, Mining, BuildNoHashHasher<u32>>,
+        m: &NewExtendedMiningJob<'static>,
+        additional_coinbase_script_data: Option<&[u8]>,
+    ) -> Result<(), Error> {
         for (id, channel) in &self.standard_channels_for_hom_downstreams {
             let job_id = self.job_ids.next();
             let mut standard_job = extended_to_standard_job(
@@ -898,13 +913,20 @@ impl ChannelFactory {
             let extended_job = Mining::NewExtendedMiningJob(extended);
             result.insert(group_id, extended_job);
         }
+        Ok(())
+    }
+
+    fn prepare_extended_jobs_for_downstream_on_new_extended(
+        &self,
+        result: &mut HashMap<u32, Mining, BuildNoHashHasher<u32>>,
+        m: &NewExtendedMiningJob<'static>,
+    ) {
         for id in self.extended_channels.keys() {
             let mut extended = m.clone();
             extended.channel_id = *id;
             let extended_job = Mining::NewExtendedMiningJob(extended);
             result.insert(*id, extended_job);
         }
-        Ok(())
     }
 
     // If there is job creator, bitcoin_target is retrieved from there. If not, it is set to 0.
@@ -1332,6 +1354,60 @@ impl PoolChannelFactory {
             // value it will be used only to create standard jobs for HOM downstreams.
             Some(&self.additional_coinbase_script_data),
         )
+    }
+
+    /// Registers a template and returns the data needed to fan out extended jobs outside the
+    /// caller's channel-factory lock.
+    #[allow(clippy::type_complexity)]
+    pub fn on_new_template_for_extended_fanout(
+        &mut self,
+        m: &mut NewTemplate<'static>,
+    ) -> Result<
+        (
+            NewExtendedMiningJob<'static>,
+            Vec<u32>,
+            HashMap<u32, Mining<'static>, BuildNoHashHasher<u32>>,
+        ),
+        Error,
+    > {
+        if !m.future_template && self.inner.last_prev_hash.is_none() {
+            return Err(Error::JobIsNotFutureButPrevHashNotPresent);
+        }
+
+        let new_job = self.job_creator.on_new_template(
+            m,
+            true,
+            self.pool_coinbase_outputs.clone(),
+            self.additional_coinbase_script_data.len() as u8,
+        )?;
+        let extended_channel_ids = self.inner.extended_channels.keys().copied().collect();
+        let mut standard_messages = HashMap::with_hasher(BuildNoHashHasher::default());
+        self.inner
+            .prepare_standard_jobs_for_downstream_on_new_extended(
+                &mut standard_messages,
+                &new_job,
+                Some(&self.additional_coinbase_script_data),
+            )?;
+
+        let mut ids = vec![];
+        for complete_id in self.inner.standard_channels_for_non_hom_downstreams.keys() {
+            let group_id = GroupId::into_group_id(*complete_id);
+            if !ids.contains(&group_id) {
+                ids.push(group_id)
+            }
+        }
+
+        match (new_job.is_future(), &self.inner.last_prev_hash) {
+            (true, _) => {
+                self.inner.future_jobs.push((new_job.clone(), ids));
+                Ok((new_job, extended_channel_ids, standard_messages))
+            }
+            (false, Some(_)) => {
+                self.inner.add_valid_job(new_job.clone(), ids);
+                Ok((new_job, extended_channel_ids, standard_messages))
+            }
+            (false, None) => unreachable!("non-future jobs require a prevhash"),
+        }
     }
 
     /// Called when a `SubmitSharesStandard` message is received from the downstream. We check the
@@ -2624,6 +2700,65 @@ mod test {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn extended_fanout_rejects_non_future_template_without_mutating_job_creator() {
+        let (prefix, _, _) = get_coinbase();
+        let out = TxOut {value: Amount::from_sat(BLOCK_REWARD), script_pubkey: decode_hex("4104c6d0969c2d98a5c19ba7c36c7937c5edbd60ff2a01397c4afe54f16cd641667ea0049ba6f9e1796ba3c8e49e1b504c532ebbaaa1010c3f7d9b83a8ea7fd800e2ac").unwrap().into()};
+        let creator = JobsCreators::new(7);
+        let share_per_min = 1.0;
+        let extranonces = ExtendedExtranonce::new(0..0, 0..0, 0..7);
+        let ids = Arc::new(Mutex::new(GroupId::new()));
+        let channel_kind = ExtendedChannelKind::Pool;
+        let mut channel = PoolChannelFactory::new(
+            ids,
+            extranonces,
+            creator,
+            share_per_min,
+            channel_kind,
+            vec![out],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let id = channel.new_standard_id_for_hom();
+        channel
+            .add_standard_channel(100, 100_000_000_000_000.0, true, id)
+            .unwrap();
+        let job_ids_before = channel.inner.job_ids.clone();
+
+        let mut p_hash = decode_hex(PREV_HASH).unwrap();
+        p_hash.reverse();
+        let prev_hash = SetNewPrevHashFromTp {
+            template_id: 10,
+            prev_hash: p_hash.try_into().unwrap(),
+            header_timestamp: PREV_HEADER_TIMESTAMP,
+            n_bits: PREV_HEADER_NBITS,
+            target: nbit_to_target(PREV_HEADER_NBITS),
+        };
+        channel.job_creator.on_new_prev_hash(&prev_hash);
+
+        let mut new_template = NewTemplate {
+            template_id: 10,
+            future_template: false,
+            version: VERSION,
+            coinbase_tx_version: 1,
+            coinbase_prefix: prefix.try_into().unwrap(),
+            coinbase_tx_input_sequence: u32::MAX,
+            coinbase_tx_value_remaining: 5_000_000_000,
+            coinbase_tx_outputs_count: 0,
+            coinbase_tx_outputs: get_coinbase_outputs(),
+            coinbase_tx_locktime: 0,
+            merkle_path: get_merkle_path(),
+        };
+
+        assert!(matches!(
+            channel.on_new_template_for_extended_fanout(&mut new_template),
+            Err(Error::JobIsNotFutureButPrevHashNotPresent)
+        ));
+        assert!(channel.job_creator.get_template_id_from_job(1).is_none());
+        assert_eq!(channel.inner.job_ids, job_ids_before);
     }
 
     #[test]
