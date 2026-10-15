@@ -1494,10 +1494,7 @@ impl PoolChannelFactory {
     /// this function can be used also from downstream, but the additional_coinbase_script_data
     /// should be empty (that field non empty only if the pool has to restore a channel, with a
     /// pool signature already assigned in a previous session)
-    // 
-    // FIXME: work subdivision is performed also with coinbase OP_RETURN  value, so when restoring
-    // a channel does any longer mean simply restore the coinbase input script extranonce but also
-    // the coinbase OP_RETURN value
+    /// With channel coinbase outputs enabled, successful restorations receive a fresh marker.
     pub fn replicate_pool_extended_channel(
         &mut self,
         request_id: u32,
@@ -1507,6 +1504,7 @@ impl PoolChannelFactory {
         extranonce_size: u16,
         additional_coinbase_script_data: Vec<u8>,
     ) -> Result<Vec<Mining<'static>>, Error> {
+        let output = self.next_channel_coinbase_output()?;
         if self.additional_coinbase_script_data.len() != additional_coinbase_script_data.len() {
             return Err(Error::NewAdditionalCoinbaseDataLenDoNotMatch);
         }
@@ -1556,7 +1554,7 @@ impl PoolChannelFactory {
         let mut result = vec![Mining::OpenExtendedMiningChannelSuccess(success)];
         self.inner
             .prepare_extended_jobs_and_p_hash(&mut result, channel_id);
-        Ok(result)
+        self.finish_extended_channel_open(channel_id, output, result)
     }
 
     /// Called only when a new prev hash is received by a Template Provider. It matches the
@@ -2893,6 +2891,17 @@ mod test {
         let channel_count = factory.inner.extended_channels.len();
         assert!(matches!(
             factory.new_extended_channel(4, 1.0, 8),
+            Err(Error::ChannelCoinbaseSequenceExhausted)
+        ));
+        assert!(matches!(
+            factory.replicate_pool_extended_channel(
+                5,
+                [255; 32].into(),
+                vec![0xfe; 8].try_into().unwrap(),
+                100,
+                8,
+                Vec::new(),
+            ),
             Err(Error::ChannelCoinbaseSequenceExhausted)
         ));
         assert_eq!(factory.inner.extended_channels.len(), channel_count);
