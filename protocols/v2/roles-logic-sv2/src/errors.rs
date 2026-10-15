@@ -103,6 +103,8 @@ pub enum Error {
     InvalidExtranonceSize(u16, u16),
     /// Extranonce prefix is already assigned to an active extended channel.
     ExtranoncePrefixAlreadyInUse,
+    /// Channel ID is reserved or already in use by a channel or group.
+    ChannelIdAlreadyInUse(u32),
     /// Poison Lock
     PoisonLock(String),
     /// Invalid BIP34 bytes
@@ -190,6 +192,7 @@ impl Display for Error {
                 )
             },
             ExtranoncePrefixAlreadyInUse => write!(f, "Extranonce prefix already in use"),
+            ChannelIdAlreadyInUse(id) => write!(f, "Channel id {} is reserved or already in use", id),
             ChannelCoinbaseSequenceExhausted => write!(f, "Channel coinbase sequence exhausted"),
             NoMoreExtranonces => write!(f, "No more extranonces"),
             JobIsNotFutureButPrevHashNotPresent => write!(f, "A non future job always expect a previous new prev hash"),
