@@ -38,17 +38,17 @@ use stratum_common::bitcoin::{
 };
 
 /// Stable output for one pool extended channel. The zero-valued OP_RETURN pushes `CHSEQ`
-/// followed by an eight-byte big-endian sequence, starting at 1 per enabled factory lifetime.
+/// followed by a 24-byte big-endian sequence, starting at 1 per enabled factory lifetime.
 /// This tagged format is reserved for the factory; other outputs are preserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ChannelCoinbaseOutput(u64);
+pub struct ChannelCoinbaseOutput([u8; 24]);
 
 impl ChannelCoinbaseOutput {
     /// Returns this channel marker as a zero-valued coinbase output.
     pub fn tx_out(self) -> TxOut {
-        let mut payload = [0; 13];
+        let mut payload = [0; 29];
         payload[..5].copy_from_slice(b"CHSEQ");
-        payload[5..].copy_from_slice(&self.0.to_be_bytes());
+        payload[5..].copy_from_slice(&self.0);
         TxOut {
             value: Amount::ZERO,
             script_pubkey: ScriptBuf::new_op_return(payload),
@@ -58,7 +58,7 @@ impl ChannelCoinbaseOutput {
     /// Conservative extra coinbase weight: the output plus two bytes for CompactSize output
     /// count growth. Larger count boundaries cannot fit in an SV2 coinbase suffix.
     pub fn additional_coinbase_weight() -> usize {
-        (serialize(&Self(0).tx_out()).len() + 2) * 4
+        (serialize(&Self([0; 24]).tx_out()).len() + 2) * 4
     }
 
     /// Materializes a pool-created job, including shared jobs returned by extended fanout.
@@ -74,11 +74,11 @@ impl ChannelCoinbaseOutput {
         let mut has_channel_output = false;
         outputs.retain_mut(|output| {
             if output.value == Amount::ZERO
-                && output.script_pubkey.len() == 15
+                && output.script_pubkey.len() == 31
                 && output
                     .script_pubkey
                     .as_bytes()
-                    .starts_with(b"\x6a\x0dCHSEQ")
+                    .starts_with(b"\x6a\x1dCHSEQ")
             {
                 if has_channel_output {
                     false
@@ -1323,7 +1323,7 @@ pub struct PoolChannelFactory {
     inner: ChannelFactory,
     job_creator: JobsCreators,
     pool_coinbase_outputs: Vec<TxOut>,
-    last_channel_coinbase_sequence: Option<u64>,
+    last_channel_coinbase_sequence: Option<[u8; 24]>,
     channel_coinbase_outputs: HashMap<u32, ChannelCoinbaseOutput, BuildNoHashHasher<u32>>,
     // Per channel additional data that the pool may want to include in the coinbase input script
     // as first part of the extranonce. This can be used to put things like the pool signature
@@ -1401,7 +1401,7 @@ impl PoolChannelFactory {
     /// sequence; closing a channel never rewinds it. Standard and custom jobs are unaffected.
     pub fn with_channel_coinbase_outputs(mut self) -> Self {
         assert!(self.inner.extended_channels.is_empty());
-        self.last_channel_coinbase_sequence.get_or_insert(0);
+        self.last_channel_coinbase_sequence.get_or_insert([0; 24]);
         self
     }
 
@@ -1412,11 +1412,15 @@ impl PoolChannelFactory {
 
     fn next_channel_coinbase_output(&self) -> Result<Option<ChannelCoinbaseOutput>, Error> {
         self.last_channel_coinbase_sequence
-            .map(|sequence| {
-                sequence
-                    .checked_add(1)
-                    .map(ChannelCoinbaseOutput)
-                    .ok_or(Error::ChannelCoinbaseSequenceExhausted)
+            .map(|mut sequence| {
+                for byte in sequence.iter_mut().rev() {
+                    let (next, carry) = byte.overflowing_add(1);
+                    *byte = next;
+                    if !carry {
+                        return Ok(ChannelCoinbaseOutput(sequence));
+                    }
+                }
+                Err(Error::ChannelCoinbaseSequenceExhausted)
             })
             .transpose()
     }
@@ -1567,6 +1571,9 @@ impl PoolChannelFactory {
             ));
         }
 
+        // TODO: Design restoration with duplicate input prefixes separated by CHSEQ.
+        // Keep this guard until marker protection covers pool-created and JD/custom jobs.
+        // The user is still considering the design; see repository-root AGENTS.md.
         if self
             .inner
             .has_extended_channel_extranonce_prefix(extranonce_prefix.as_ref())
@@ -2874,7 +2881,13 @@ mod test {
         }
     }
 
-    fn channel_output_sequence(job: &NewExtendedMiningJob<'static>) -> u64 {
+    fn channel_sequence(value: u8) -> [u8; 24] {
+        let mut sequence = [0; 24];
+        sequence[23] = value;
+        sequence
+    }
+
+    fn channel_output_sequence(job: &NewExtendedMiningJob<'static>) -> [u8; 24] {
         let (outputs, _): (Vec<TxOut>, usize) =
             deserialize_partial(&job.coinbase_tx_suffix.as_ref()[4..]).unwrap();
         let sequences: Vec<_> = outputs
@@ -2883,11 +2896,11 @@ mod test {
                 output
                     .script_pubkey
                     .as_bytes()
-                    .starts_with(b"\x6a\x0dCHSEQ")
+                    .starts_with(b"\x6a\x1dCHSEQ")
             })
             .map(|output| {
                 assert_eq!(output.value, Amount::ZERO);
-                u64::from_be_bytes(output.script_pubkey.as_bytes()[7..].try_into().unwrap())
+                output.script_pubkey.as_bytes()[7..].try_into().unwrap()
             })
             .collect();
         assert_eq!(sequences.len(), 1);
@@ -2901,6 +2914,31 @@ mod test {
         {
             Mining::OpenExtendedMiningChannelSuccess(success) => success.channel_id,
             _ => panic!("expected successful channel open"),
+        }
+    }
+
+    #[test]
+    fn channel_coinbase_sequence_carries_across_all_24_bytes() {
+        let mut factory =
+            pool_channel_factory(Vec::new(), ExtendedExtranonce::new(0..0, 0..8, 8..16))
+                .with_channel_coinbase_outputs();
+        let (base_job, _, _) = factory
+            .on_new_template_for_extended_fanout(&mut new_template(10))
+            .unwrap();
+        for index in (0..24).rev() {
+            let mut previous = [0; 24];
+            previous[index + 1..].fill(u8::MAX);
+            factory.last_channel_coinbase_sequence = Some(previous);
+            let mut expected = [0; 24];
+            expected[index] = 1;
+
+            let channel_id = open_output_channel(&mut factory);
+            let output = factory.channel_coinbase_output(channel_id).unwrap();
+            assert_eq!(output.0, expected);
+            assert_eq!(factory.last_channel_coinbase_sequence, Some(expected));
+            let mut job = base_job.clone();
+            output.apply(&mut job).unwrap();
+            assert_eq!(channel_output_sequence(&job), expected);
         }
     }
 
@@ -3270,7 +3308,9 @@ mod test {
             factory.inner.future_jobs[0].0.coinbase_tx_suffix
         );
         match messages.get(&channel_id).unwrap() {
-            Mining::NewExtendedMiningJob(job) => assert_eq!(channel_output_sequence(job), 1),
+            Mining::NewExtendedMiningJob(job) => {
+                assert_eq!(channel_output_sequence(job), channel_sequence(1))
+            }
             _ => panic!("expected extended channel job"),
         }
         let mut prev_hash = new_prev_hash(10);
@@ -3304,7 +3344,7 @@ mod test {
         for (channel_id, sequence) in [(first, 1), (second, 2)] {
             match messages.get(&channel_id).unwrap() {
                 Mining::NewExtendedMiningJob(job) => {
-                    assert_eq!(channel_output_sequence(job), sequence)
+                    assert_eq!(channel_output_sequence(job), channel_sequence(sequence))
                 }
                 _ => panic!(),
             }
@@ -3315,7 +3355,7 @@ mod test {
         factory.on_new_template(&mut new_template(11)).unwrap();
         assert_eq!(
             channel_output_sequence(&factory.current_extended_job_for_channel(second).unwrap()),
-            2
+            channel_sequence(2)
         );
 
         let prefix = factory.get_extranonce_prefix(first).unwrap();
@@ -3345,12 +3385,12 @@ mod test {
             .collect();
         assert_eq!(cached_jobs.len(), 2); // Current and future jobs.
         for job in cached_jobs {
-            assert_eq!(channel_output_sequence(job), 3);
+            assert_eq!(channel_output_sequence(job), channel_sequence(3));
         }
         let fourth = open_output_channel(&mut factory);
         assert_eq!(
             factory.channel_coinbase_output(fourth),
-            Some(ChannelCoinbaseOutput(4))
+            Some(ChannelCoinbaseOutput(channel_sequence(4)))
         );
 
         let (base, channel_ids, _) = factory
@@ -3363,7 +3403,7 @@ mod test {
             output.apply(&mut job).unwrap();
             assert_eq!(channel_output_sequence(&job), output.0);
         }
-        factory.last_channel_coinbase_sequence = Some(u64::MAX);
+        factory.last_channel_coinbase_sequence = Some([u8::MAX; 24]);
         let channel_count = factory.inner.extended_channels.len();
         assert!(matches!(
             factory.new_extended_channel(4, 1.0, 8),
@@ -3381,6 +3421,7 @@ mod test {
             Err(Error::ChannelCoinbaseSequenceExhausted)
         ));
         assert_eq!(factory.inner.extended_channels.len(), channel_count);
+        assert_eq!(factory.last_channel_coinbase_sequence, Some([u8::MAX; 24]));
     }
 
     #[test]
@@ -3400,12 +3441,12 @@ mod test {
             .channel_to_additional_coinbase_script_data
             .is_empty());
         assert!(factory.channel_coinbase_outputs.is_empty());
-        assert_eq!(factory.last_channel_coinbase_sequence, Some(0));
+        assert_eq!(factory.last_channel_coinbase_sequence, Some([0; 24]));
         factory.inner.future_jobs.clear();
         let channel_id = open_output_channel(&mut factory);
         assert_eq!(
             factory.channel_coinbase_output(channel_id),
-            Some(ChannelCoinbaseOutput(1))
+            Some(ChannelCoinbaseOutput(channel_sequence(1)))
         );
     }
 
@@ -3443,13 +3484,17 @@ mod test {
         let encoded = serialize(&tx);
         job.coinbase_tx_suffix = encoded[split..].to_vec().try_into().unwrap();
         let original_prefix = job.coinbase_tx_prefix.clone();
-        ChannelCoinbaseOutput(1).apply(&mut job).unwrap();
+        ChannelCoinbaseOutput(channel_sequence(1))
+            .apply(&mut job)
+            .unwrap();
         assert_eq!(&job.coinbase_tx_suffix.as_ref()[4..7], &[0xfd, 0xfd, 0]);
         assert_eq!(
             job.coinbase_tx_suffix.len() - (encoded.len() - split),
             ChannelCoinbaseOutput::additional_coinbase_weight() / 4
         );
-        ChannelCoinbaseOutput(1).apply(&mut job).unwrap();
+        ChannelCoinbaseOutput(channel_sequence(1))
+            .apply(&mut job)
+            .unwrap();
         assert_eq!(job.coinbase_tx_prefix, original_prefix);
         let coinbase = [
             job.coinbase_tx_prefix.as_ref(),
@@ -3464,7 +3509,7 @@ mod test {
         assert_eq!(composed.version, tx.version);
         assert_eq!(composed.output[..252], original_outputs);
         assert_eq!(composed.output.len(), 253);
-        assert_eq!(channel_output_sequence(&job), 1);
+        assert_eq!(channel_output_sequence(&job), channel_sequence(1));
     }
 
     #[test]
@@ -3483,10 +3528,10 @@ mod test {
             Mining::NewExtendedMiningJob(job) => job,
             _ => panic!(),
         };
-        assert_eq!(channel_output_sequence(&job), 1);
+        assert_eq!(channel_output_sequence(&job), channel_sequence(1));
         assert_eq!(
             factory.channel_coinbase_output(other_channel),
-            Some(ChannelCoinbaseOutput(2))
+            Some(ChannelCoinbaseOutput(channel_sequence(2)))
         );
         let mut prevhash = new_prev_hash(10);
         let mut target_bytes = [255; 32];
@@ -3545,15 +3590,15 @@ mod test {
                         .unwrap();
                 factory.register_extended_job_coinbase_output(channel_id, job.job_id, output);
             }
-            assert_eq!(channel_output_sequence(&job), 1);
+            assert_eq!(channel_output_sequence(&job), channel_sequence(1));
             // Use this channel's correct scriptSig and change ONLY the channel-output payload.
             let mut wrong_job = job.clone();
             let mut wrong_suffix = wrong_job.coinbase_tx_suffix.to_vec();
             let tag = wrong_suffix
                 .windows(7)
-                .position(|bytes| bytes == b"\x6a\x0dCHSEQ")
+                .position(|bytes| bytes == b"\x6a\x1dCHSEQ")
                 .unwrap();
-            wrong_suffix[tag + 7..tag + 15].copy_from_slice(&2_u64.to_be_bytes());
+            wrong_suffix[tag + 7..tag + 31].copy_from_slice(&channel_sequence(2));
             wrong_job.coinbase_tx_suffix = wrong_suffix.try_into().unwrap();
             let wrong_nonce = (0..1000)
                 .find(|nonce| {
