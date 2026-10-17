@@ -44,7 +44,8 @@ use stratum_common::bitcoin::{
 pub struct ChannelCoinbaseOutput(u64);
 
 impl ChannelCoinbaseOutput {
-    fn tx_out(self) -> TxOut {
+    /// Returns this channel marker as a zero-valued coinbase output.
+    pub fn tx_out(self) -> TxOut {
         let mut payload = [0; 13];
         payload[..5].copy_from_slice(b"CHSEQ");
         payload[5..].copy_from_slice(&self.0.to_be_bytes());
