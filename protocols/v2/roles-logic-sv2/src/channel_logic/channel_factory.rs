@@ -1325,6 +1325,7 @@ pub struct PoolChannelFactory {
     pool_coinbase_outputs: Vec<TxOut>,
     last_channel_coinbase_sequence: Option<[u8; 24]>,
     channel_coinbase_outputs: HashMap<u32, ChannelCoinbaseOutput, BuildNoHashHasher<u32>>,
+    user_identifier_to_channel: HashMap<Vec<u8>, u32>,
     // Per channel additional data that the pool may want to include in the coinbase input script
     // as first part of the extranonce. This can be used to put things like the pool signature
     // or commitments. It is per channel since the pool may want to include different
@@ -1387,6 +1388,7 @@ impl PoolChannelFactory {
             pool_coinbase_outputs,
             last_channel_coinbase_sequence: None,
             channel_coinbase_outputs: HashMap::with_hasher(BuildNoHashHasher::default()),
+            user_identifier_to_channel: HashMap::new(),
             channel_to_additional_coinbase_script_data: HashMap::with_hasher(
                 BuildNoHashHasher::default(),
             ),
@@ -1408,6 +1410,35 @@ impl PoolChannelFactory {
     /// Copies a channel's stable output so callers can materialize jobs outside the factory lock.
     pub fn channel_coinbase_output(&self, channel_id: u32) -> Option<ChannelCoinbaseOutput> {
         self.channel_coinbase_outputs.get(&channel_id).copied()
+    }
+
+    /// Registers a user identifier for an open extended channel. Repeating the same pair is allowed.
+    /// NOTE: Requires `user_identifier` to be unique across channels; two different channels
+    /// must not use the same user identifier.
+    /// Returns `ChannelIdAlreadyInUse(existing_id)` if the identifier names another channel.
+    pub fn register_channel_user(
+        &mut self,
+        channel_id: u32,
+        user_identifier: &[u8],
+    ) -> Result<(), Error> {
+        if !self.inner.extended_channels.contains_key(&channel_id) {
+            return Err(Error::NotFoundChannelId);
+        }
+        if let Some(existing_id) = self.user_identifier_to_channel.get(user_identifier) {
+            if *existing_id != channel_id {
+                return Err(Error::ChannelIdAlreadyInUse(*existing_id));
+            }
+        }
+        self.user_identifier_to_channel
+            .insert(user_identifier.to_vec(), channel_id);
+        Ok(())
+    }
+
+    /// Looks up an explicitly registered user identifier, returning `None` after its channel closes.
+    pub fn channel_id_for_user(&self, user_identifier: &[u8]) -> Option<u32> {
+        self.user_identifier_to_channel
+            .get(user_identifier)
+            .copied()
     }
 
     fn next_channel_coinbase_output(&self) -> Result<Option<ChannelCoinbaseOutput>, Error> {
@@ -2084,6 +2115,8 @@ impl PoolChannelFactory {
         self.channel_to_additional_coinbase_script_data
             .retain(|k, _| k != &channel_id);
         self.channel_coinbase_outputs.remove(&channel_id);
+        self.user_identifier_to_channel
+            .retain(|_, id| *id != channel_id);
         self.negotiated_jobs.remove(&channel_id);
         self.inner.close_channel(channel_id);
     }
@@ -2915,6 +2948,55 @@ mod test {
             Mining::OpenExtendedMiningChannelSuccess(success) => success.channel_id,
             _ => panic!("expected successful channel open"),
         }
+    }
+
+    #[test]
+    fn registered_user_identifiers_handle_conflicts_close_and_restoration() {
+        let mut factory =
+            pool_channel_factory(Vec::new(), ExtendedExtranonce::new(0..0, 0..8, 8..16));
+        let user_identifier = b"user\x00\xff".as_slice();
+        assert_eq!(factory.channel_id_for_user(user_identifier), None);
+        assert!(matches!(
+            factory.register_channel_user(u32::MAX, user_identifier),
+            Err(Error::NotFoundChannelId)
+        ));
+        assert_eq!(factory.channel_id_for_user(user_identifier), None);
+
+        let first = open_output_channel(&mut factory);
+        let second = open_output_channel(&mut factory);
+        factory
+            .register_channel_user(first, user_identifier)
+            .unwrap();
+        factory
+            .register_channel_user(first, user_identifier)
+            .unwrap();
+        assert_eq!(factory.channel_id_for_user(user_identifier), Some(first));
+        assert!(matches!(
+            factory.register_channel_user(second, user_identifier),
+            Err(Error::ChannelIdAlreadyInUse(id)) if id == first
+        ));
+        assert_eq!(factory.channel_id_for_user(user_identifier), Some(first));
+        factory.register_channel_user(second, b"other").unwrap();
+        let prefix = factory.get_extranonce_prefix(first).unwrap();
+        factory.close_channel(first);
+        assert_eq!(factory.channel_id_for_user(user_identifier), None);
+        assert_eq!(factory.channel_id_for_user(b"other"), Some(second));
+
+        factory
+            .replicate_pool_extended_channel(
+                3,
+                [255; 32].into(),
+                prefix.try_into().unwrap(),
+                99,
+                8,
+                Vec::new(),
+            )
+            .unwrap();
+        factory.register_channel_user(99, user_identifier).unwrap();
+        factory.close_channel(first);
+        assert_eq!(factory.channel_id_for_user(user_identifier), Some(99));
+        factory.close_channel(99);
+        assert_eq!(factory.channel_id_for_user(user_identifier), None);
     }
 
     #[test]
