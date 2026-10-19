@@ -39,7 +39,8 @@ use stratum_common::bitcoin::{
 use stratum_common::secp256k1::rand::{rngs::OsRng, RngCore};
 
 /// Stable output for one pool extended channel. The zero-valued OP_RETURN pushes `CHSEQ`
-/// followed by a 24-byte big-endian sequence with a random starting point per factory lifetime.
+/// followed by a fixed 16-byte random factory prefix and an 8-byte big-endian channel counter.
+/// The counter starts at 1; the prefix is shared by all channels for the factory's lifetime.
 /// This tagged format is reserved for the factory; other outputs are preserved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChannelCoinbaseOutput([u8; 24]);
@@ -1401,13 +1402,14 @@ impl PoolChannelFactory {
 
     /// Enables stable channel outputs before opening any extended channels. Disabled by default.
     /// Each successful pool extended open (including restored prefixes) receives the next
-    /// sequence; closing a channel never rewinds it. Random initialization separates factory
-    /// lifetimes. Standard jobs are unaffected; custom jobs must carry their channel's output.
+    /// 8-byte counter, starting at 1; closing a channel never rewinds it. The 16-byte random
+    /// prefix is initialized once and shared for the factory's lifetime. Standard jobs are
+    /// unaffected; custom jobs must carry their channel's output.
     pub fn with_channel_coinbase_outputs(mut self) -> Self {
         assert!(self.inner.extended_channels.is_empty());
         self.last_channel_coinbase_sequence.get_or_insert_with(|| {
             let mut sequence = [0; 24];
-            OsRng.fill_bytes(&mut sequence);
+            OsRng.fill_bytes(&mut sequence[..16]);
             sequence
         });
         self
@@ -1450,7 +1452,7 @@ impl PoolChannelFactory {
     fn next_channel_coinbase_output(&self) -> Result<Option<ChannelCoinbaseOutput>, Error> {
         self.last_channel_coinbase_sequence
             .map(|mut sequence| {
-                for byte in sequence.iter_mut().rev() {
+                for byte in sequence[16..].iter_mut().rev() {
                     let (next, carry) = byte.overflowing_add(1);
                     *byte = next;
                     if !carry {
@@ -3034,18 +3036,20 @@ mod test {
     }
 
     #[test]
-    fn channel_coinbase_sequence_carries_across_all_24_bytes() {
+    fn channel_coinbase_counter_carries_without_changing_factory_prefix() {
         let mut factory =
             pool_channel_factory(Vec::new(), ExtendedExtranonce::new(0..0, 0..8, 8..16))
                 .with_channel_coinbase_outputs();
         let (base_job, _, _) = factory
             .on_new_template_for_extended_fanout(&mut new_template(10))
             .unwrap();
-        for index in (0..24).rev() {
+        for index in (16..24).rev() {
             let mut previous = [0; 24];
+            previous[..16].fill(0x42);
             previous[index + 1..].fill(u8::MAX);
             factory.last_channel_coinbase_sequence = Some(previous);
             let mut expected = [0; 24];
+            expected[..16].fill(0x42);
             expected[index] = 1;
 
             let channel_id = open_output_channel(&mut factory);
@@ -3059,13 +3063,26 @@ mod test {
     }
 
     #[test]
-    fn channel_coinbase_outputs_differ_across_factory_lifetimes() {
+    fn channel_coinbase_outputs_share_factory_prefix_and_reset_counter_on_restart() {
         let mut previous =
             pool_channel_factory(Vec::new(), ExtendedExtranonce::new(0..0, 0..8, 8..16))
                 .with_channel_coinbase_outputs();
+        let initial = previous.last_channel_coinbase_sequence.unwrap();
+        assert_eq!(&initial[16..], &[0; 8]);
+        previous = previous.with_channel_coinbase_outputs();
+        assert_eq!(previous.last_channel_coinbase_sequence, Some(initial));
         let channel_id = open_output_channel(&mut previous);
         let prefix = previous.get_extranonce_prefix(channel_id).unwrap();
         let old_output = previous.channel_coinbase_output(channel_id).unwrap();
+        assert_eq!(&old_output.0[..16], &initial[..16]);
+        assert_eq!(&old_output.0[16..], &1_u64.to_be_bytes());
+        for counter in 2_u64..=3 {
+            let id = open_output_channel(&mut previous);
+            let output = previous.channel_coinbase_output(id).unwrap();
+            assert_eq!(&output.0[..16], &initial[..16]);
+            assert_eq!(&output.0[16..], &counter.to_be_bytes());
+            previous.close_channel(id);
+        }
         drop(previous);
 
         let mut restarted =
@@ -3082,10 +3099,9 @@ mod test {
             )
             .unwrap();
         assert_eq!(restarted.get_extranonce_prefix(channel_id).unwrap(), prefix);
-        assert_ne!(
-            restarted.channel_coinbase_output(channel_id),
-            Some(old_output)
-        );
+        let restored_output = restarted.channel_coinbase_output(channel_id).unwrap();
+        assert_ne!(&restored_output.0[..16], &old_output.0[..16]);
+        assert_eq!(&restored_output.0[16..], &1_u64.to_be_bytes());
     }
 
     #[test]
@@ -3561,7 +3577,9 @@ mod test {
             output.apply(&mut job).unwrap();
             assert_eq!(channel_output_sequence(&job), output.0);
         }
-        factory.last_channel_coinbase_sequence = Some([u8::MAX; 24]);
+        let mut exhausted = factory.last_channel_coinbase_sequence.unwrap();
+        exhausted[16..].fill(u8::MAX);
+        factory.last_channel_coinbase_sequence = Some(exhausted);
         let channel_count = factory.inner.extended_channels.len();
         assert!(matches!(
             factory.new_extended_channel(4, 1.0, 8),
@@ -3579,7 +3597,7 @@ mod test {
             Err(Error::ChannelCoinbaseSequenceExhausted)
         ));
         assert_eq!(factory.inner.extended_channels.len(), channel_count);
-        assert_eq!(factory.last_channel_coinbase_sequence, Some([u8::MAX; 24]));
+        assert_eq!(factory.last_channel_coinbase_sequence, Some(exhausted));
     }
 
     #[test]
