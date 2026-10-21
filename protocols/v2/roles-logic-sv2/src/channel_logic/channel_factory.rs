@@ -14,8 +14,8 @@ use crate::{
 use mining_sv2::{
     ExtendedExtranonce, NewExtendedMiningJob, NewMiningJob, OpenExtendedMiningChannelSuccess,
     OpenMiningChannelError, OpenStandardMiningChannelSuccess, SetCustomMiningJob,
-    SetCustomMiningJobSuccess, SetExtranoncePrefix, SetNewPrevHash, SubmitSharesError,
-    SubmitSharesExtended, SubmitSharesStandard, Target,
+    SetCustomMiningJobError, SetCustomMiningJobSuccess, SetExtranoncePrefix, SetNewPrevHash,
+    SubmitSharesError, SubmitSharesExtended, SubmitSharesStandard, Target,
 };
 
 use hex::DisplayHex;
@@ -1982,26 +1982,31 @@ impl PoolChannelFactory {
 
     /// Called when a new custom mining job arrives
     ///
-    /// # Panics
-    /// Panics if a channel with a registered CHSEQ output receives a custom job without exactly
-    /// one matching CHSEQ output in its coinbase.
+    /// # Errors
+    /// Rejects a custom job without exactly one matching CHSEQ output when the channel has a
+    /// registered output. Rejected jobs do not replace the channel's current job or consume a job ID.
     pub fn on_new_set_custom_mining_job(
         &mut self,
         set_custom_mining_job: SetCustomMiningJob<'static>,
-    ) -> SetCustomMiningJobSuccess {
-        if self.check_set_custom_mining_job(&set_custom_mining_job) {
-            self.negotiated_jobs.insert(
-                set_custom_mining_job.channel_id,
-                set_custom_mining_job.clone(),
-            );
-            SetCustomMiningJobSuccess {
+    ) -> Result<SetCustomMiningJobSuccess, SetCustomMiningJobError<'static>> {
+        if !self.check_set_custom_mining_job(&set_custom_mining_job) {
+            return Err(SetCustomMiningJobError {
                 channel_id: set_custom_mining_job.channel_id,
                 request_id: set_custom_mining_job.request_id,
-                job_id: self.inner.job_ids.next(),
-            }
-        } else {
-            todo!()
+                error_code: "invalid-job-param-value-coinbase_tx_outputs"
+                    .to_string()
+                    .try_into()
+                    .unwrap(),
+            });
         }
+        let success = SetCustomMiningJobSuccess {
+            channel_id: set_custom_mining_job.channel_id,
+            request_id: set_custom_mining_job.request_id,
+            job_id: self.inner.job_ids.next(),
+        };
+        self.negotiated_jobs
+            .insert(set_custom_mining_job.channel_id, set_custom_mining_job);
+        Ok(success)
     }
 
     fn check_set_custom_mining_job(
@@ -2018,15 +2023,8 @@ impl PoolChannelFactory {
                     .as_bytes()
                     .starts_with(b"\x6a\x1dCHSEQ")
             });
-            assert_eq!(
-                channel_outputs.next(),
-                Some(&output.tx_out()),
-                "Custom job must contain the channel's registered CHSEQ output"
-            );
-            assert!(
-                channel_outputs.next().is_none(),
-                "Custom job must contain exactly one CHSEQ output"
-            );
+            return channel_outputs.next() == Some(&output.tx_out())
+                && channel_outputs.next().is_none();
         }
         true
     }
@@ -3152,7 +3150,7 @@ mod test {
                 .tx_out(),
         ));
         custom.coinbase_tx_outputs = outputs.try_into().unwrap();
-        factory.on_new_set_custom_mining_job(custom);
+        factory.on_new_set_custom_mining_job(custom).unwrap();
         factory.on_new_template(&mut new_template(10)).unwrap();
         factory
             .on_new_prev_hash_from_tp(&new_prev_hash(10))
@@ -4615,7 +4613,51 @@ mod test {
     }
 
     #[test]
-    fn colliding_custom_jobs_assert_exact_channel_output_before_registration() {
+    fn invalid_custom_job_does_not_poison_factory_or_replace_previous_job() {
+        let mut factory =
+            pool_channel_factory(Vec::new(), ExtendedExtranonce::new(0..0, 0..8, 8..16))
+                .with_channel_coinbase_outputs();
+        let channel_id = open_output_channel(&mut factory);
+        let mut valid = custom_job_with_prefix(channel_id, Vec::new());
+        let mut outputs = valid.coinbase_tx_outputs.to_vec();
+        outputs.extend(serialize(
+            &factory
+                .channel_coinbase_output(channel_id)
+                .unwrap()
+                .tx_out(),
+        ));
+        valid.coinbase_tx_outputs = outputs.try_into().unwrap();
+        let accepted = factory.on_new_set_custom_mining_job(valid.clone()).unwrap();
+        let previous_job_ids = factory.inner.job_ids.clone();
+
+        let factory = Mutex::new(factory);
+        let mut invalid = custom_job_with_prefix(channel_id, Vec::new());
+        invalid.request_id = 42;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            factory.safe_lock(|factory| factory.on_new_set_custom_mining_job(invalid))
+        }));
+        let error = result
+            .expect("invalid CHSEQ must not panic")
+            .expect("invalid CHSEQ must not poison the shared factory")
+            .expect_err("missing CHSEQ must be rejected");
+        assert_eq!(error.channel_id, channel_id);
+        assert_eq!(error.request_id, 42);
+        assert_eq!(
+            error.error_code.as_ref(),
+            b"invalid-job-param-value-coinbase_tx_outputs"
+        );
+        factory
+            .safe_lock(|factory| {
+                assert_eq!(factory.negotiated_jobs.get(&channel_id), Some(&valid));
+                assert_eq!(factory.inner.job_ids, previous_job_ids);
+                let next = factory.on_new_set_custom_mining_job(valid).unwrap();
+                assert_eq!(next.job_id, accepted.job_id + 1);
+            })
+            .expect("invalid CHSEQ must not poison the shared factory");
+    }
+
+    #[test]
+    fn colliding_custom_jobs_reject_invalid_channel_output_before_registration() {
         let mut factory =
             pool_channel_factory(Vec::new(), ExtendedExtranonce::new(0..0, 0..8, 8..16))
                 .with_channel_coinbase_outputs();
@@ -4656,14 +4698,14 @@ mod test {
                 for marker in &markers {
                     outputs.extend(serialize(marker));
                 }
+                custom.request_id = 42;
                 custom.coinbase_tx_outputs = outputs.clone().try_into().unwrap();
+                let previous_job_ids = factory.inner.job_ids.clone();
                 let previous_outputs = factory
                     .negotiated_jobs
                     .get(&channel_id)
                     .map(|job| job.coinbase_tx_outputs.clone());
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    factory.on_new_set_custom_mining_job(custom)
-                }));
+                let result = factory.on_new_set_custom_mining_job(custom);
                 if valid {
                     let success = result.unwrap();
                     let mut share = submit_extended_share(channel_id);
@@ -4683,13 +4725,14 @@ mod test {
                         outputs
                     );
                 } else {
-                    let panic = result.expect_err("invalid CHSEQ must assert at registration");
-                    let message = panic
-                        .downcast_ref::<String>()
-                        .map(String::as_str)
-                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                        .unwrap();
-                    assert!(message.contains("CHSEQ"));
+                    let error = result.expect_err("invalid CHSEQ must be rejected");
+                    assert_eq!(error.channel_id, channel_id);
+                    assert_eq!(error.request_id, 42);
+                    assert_eq!(
+                        error.error_code.as_ref(),
+                        b"invalid-job-param-value-coinbase_tx_outputs"
+                    );
+                    assert_eq!(factory.inner.job_ids, previous_job_ids);
                     assert_eq!(
                         factory
                             .negotiated_jobs
@@ -4714,7 +4757,7 @@ mod test {
         factory.job_creator.on_new_prev_hash(&prev_hash);
 
         let first = custom_job_with_prefix(channel_id, vec![0x02, 0xe8, 0x03, 0]);
-        let first_ack = factory.on_new_set_custom_mining_job(first.clone());
+        let first_ack = factory.on_new_set_custom_mining_job(first.clone()).unwrap();
         let mut share = submit_extended_share(channel_id);
         // The pool offsets the factory's ID before acknowledging the job downstream.
         share.job_id = first_ack.job_id.wrapping_add(1_000_000_000);
@@ -4730,12 +4773,12 @@ mod test {
 
         let mut other = custom_job_with_prefix(other_channel_id, vec![0x02, 0xe8, 0x03, 0]);
         other.coinbase_tx_locktime = 2;
-        let other_ack = factory.on_new_set_custom_mining_job(other);
+        let other_ack = factory.on_new_set_custom_mining_job(other).unwrap();
 
         let mut second = first;
         second.request_id = 2;
         second.coinbase_tx_locktime = 1;
-        let second_ack = factory.on_new_set_custom_mining_job(second);
+        let second_ack = factory.on_new_set_custom_mining_job(second).unwrap();
         assert_ne!(first_ack.job_id, second_ack.job_id);
         for (channel_id, job_id, lock_time) in [
             (channel_id, second_ack.job_id, 1),
@@ -4784,7 +4827,9 @@ mod test {
             .current_extended_job_for_channel(channel_id)
             .is_some());
 
-        channel.on_new_set_custom_mining_job(custom_job_with_prefix(channel_id, Vec::new()));
+        channel
+            .on_new_set_custom_mining_job(custom_job_with_prefix(channel_id, Vec::new()))
+            .unwrap();
 
         assert!(channel
             .current_extended_job_for_channel(channel_id)
@@ -4880,10 +4925,12 @@ mod test {
         };
 
         let malformed_prefix = vec![0x4c];
-        channel.on_new_set_custom_mining_job(custom_job_with_prefix(
-            channel_id,
-            malformed_prefix.clone(),
-        ));
+        channel
+            .on_new_set_custom_mining_job(custom_job_with_prefix(
+                channel_id,
+                malformed_prefix.clone(),
+            ))
+            .unwrap();
 
         assert!(matches!(
             channel.on_submit_shares_extended(submit_extended_share(channel_id)),
